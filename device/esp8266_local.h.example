@@ -1,0 +1,6 @@
+#pragma once
+const char* WIFI_SSID = "YOUR_WIFI_SSID";
+const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* API_URL = "http://192.168.254.110/ecosenseV.2.1/api/ingest.php";
+const char* DEVICE_UID = "ECO-ESP8266-01";
+const char* DEVICE_API_KEY = "YOUR_DEVICE_API_KEY";

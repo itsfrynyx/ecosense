@@ -1,0 +1,18 @@
+# Light hardening only — no rewrites, no framework assumptions.
+
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^(?:config|database)/ - [F,L]
+</IfModule>
+
+<FilesMatch "\.(?:sql|log|ini|bak|md)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>

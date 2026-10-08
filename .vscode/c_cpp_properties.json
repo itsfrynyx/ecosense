@@ -1,0 +1,28 @@
+{
+  "configurations": [
+    {
+      "name": "NodeMCU ESP8266",
+      "compilerPath": "${env:USERPROFILE}/.platformio/packages/toolchain-xtensa/bin/xtensa-lx106-elf-g++.exe",
+      "includePath": [
+        "${workspaceFolder}/device",
+        "${env:LOCALAPPDATA}/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/cores/esp8266",
+        "${env:LOCALAPPDATA}/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/variants/nodemcu",
+        "${env:LOCALAPPDATA}/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/libraries/**",
+        "${env:USERPROFILE}/Documents/Arduino/libraries/**"
+      ],
+      "forcedInclude": [
+        "${env:LOCALAPPDATA}/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/cores/esp8266/Arduino.h"
+      ],
+      "defines": [
+        "ARDUINO=10819",
+        "ESP8266",
+        "ARDUINO_ARCH_ESP8266",
+        "ARDUINO_ESP8266_NODEMCU",
+        "F_CPU=80000000L"
+      ],
+      "cStandard": "gnu17",
+      "cppStandard": "gnu++17"
+    }
+  ],
+  "version": 4
+}

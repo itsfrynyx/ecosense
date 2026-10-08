@@ -1,0 +1,8 @@
+device/esp8266_local.h
+device/esp32_local.h
+.env
+.env.*
+!.env.example
+*.log
+Thumbs.db
+.DS_Store
