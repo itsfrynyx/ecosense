@@ -1,4 +1,4 @@
-Before uploading a sketch, copy its local configuration template:
+You can paste the complete sketch into a single Arduino IDE tab and edit the placeholder settings at the top. For a separate configuration file, copy its local configuration template instead:
 
 - ESP8266: copy `esp8266_local.h.example` to `esp8266_local.h`.
 - ESP32: copy `esp32_local.h.example` to `esp32_local.h`.

@@ -33,7 +33,7 @@ if (!defined('APP_DEBUG')) define('APP_DEBUG', false);
 
 if (!defined('RETENTION_DAYS'))      define('RETENTION_DAYS', 30);
 if (!defined('DEVICE_ONLINE_WINDOW')) define('DEVICE_ONLINE_WINDOW', 60);
-if (!defined('TELEMETRY_INTERVAL'))   define('TELEMETRY_INTERVAL', 2);
+if (!defined('TELEMETRY_INTERVAL'))   define('TELEMETRY_INTERVAL', 5);
 if (!defined('DASHBOARD_POLL_MS'))    define('DASHBOARD_POLL_MS', 3000);
 if (!defined('INGEST_RATE_LIMIT'))    define('INGEST_RATE_LIMIT', 60);
 

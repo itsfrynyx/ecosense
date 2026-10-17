@@ -1,8 +1,11 @@
 # EcoSense
 
+Current hardware: **DHT22 + digital rain sensor**, primarily on ESP8266 NodeMCU. See [ESP8266 setup](ESP8266_SETUP_GUIDE.md). Existing installations: start MySQL, then run `C:\xamppni\php\php.exe database/setup_rain.php`. This preserves readings and disables unsupported legacy alert rules. Do not re-import the schema over an existing installation.
+
+
 **An IoT-based system for real-time weather detection and temperature monitoring.**
 
-ESP32 sensor nodes → Wi-Fi → PHP/MySQL ingest API → live dashboard, running on XAMPP.
+ESP8266 / ESP32 DHT22 and rain sensor nodes → Wi-Fi → PHP/MySQL ingest API → live dashboard, running on XAMPP.
 This folder is the project root: `index.php` is the public landing page, everything under
 `dashboard.php` and the rest of the app requires a login.
 
@@ -92,11 +95,11 @@ Everything lives in `config/config.php` and is safe to edit — each constant is
 | `RETENTION_DAYS` | `30` | history window used by the prune job |
 | `DEVICE_ONLINE_WINDOW` | `60` | seconds without a packet before a node is Offline |
 | `TEMP_WARN_HIGH` / `TEMP_CRIT_HIGH` / `TEMP_WARN_LOW` | `32` / `38` / `12` | default thresholds |
-| `HUMIDITY_WARN` / `PRESSURE_LOW` | `80` / `990` | default thresholds |
+| `HUMIDITY_WARN` | `80` | humidity warning threshold |
 | `APP_DEBUG` | `false` | set `true` to display PHP errors while developing |
 
 Sensor values arriving at the API are range-checked server-side: temperature −60…85 °C,
-humidity 0…100 %, pressure 300…1200 hPa, battery 0…100 %, RSSI −120…0 dBm. Anything outside
+humidity 0…100 %, rain_detected 0 or 1, RSSI −120…0 dBm. Anything outside
 returns `422` and writes nothing.
 
 ---
@@ -111,7 +114,7 @@ X-Device-Key: <64-char key from the Devices page>
 Content-Type: application/json
 
 {"device_uid":"ECO-TH-001","temperature_c":28.4,"humidity_pct":63.2,
- "pressure_hpa":1008.4,"lux":214.5,"battery_pct":92,"signal_dbm":-54}
+ "rain_detected":0,"signal_dbm":-54}
 ```
 
 Responses: `201 {"ok":true,"reading_id":1932,"alerts_triggered":0}` · `401` bad UID/key ·
@@ -164,13 +167,13 @@ Session-authenticated. Lists fleet with latest reading and 24h min/max/avg.
 Session + CSRF. Body {"alert_id":...} to acknowledge an alert.
 
 ### GET api/export.php
-Session-authenticated. Streams text/csv with header: timestamp,device_uid,temperature_c,humidity_pct,pressure_hpa,heat_index_c,lux,battery_pct,signal_dbm.
+Session-authenticated. Streams text/csv with header: timestamp,device_uid,temperature_c,humidity_pct,rain_detected,heat_index_c,signal_dbm.
 
 ### POST api/simulate.php
 Session-authenticated + CSRF. Generates one realistic reading and inserts it.
 
 ## Firmware
-ESP32 sketch in device/ecosense_node.esp32.ino. Reads DHT22, BMP280, BH1750 with DeepSleep ~2s, Wi-Fi connect with retry, LED status, HTTP POST with X-Device-Key, OTA stub. See device/README.md.
+Use device/ecosense_esp8266.ino for NodeMCU or device/ecosense_node.esp32.ino for ESP32. Both read only DHT22 and digital rain status every five seconds. See device/README.md.
 
 ## Demo data
 Import database/schema.sql to create tables with seed data (4 devices, demo users, alert rules, ~2000 readings over 48h). Re-import to refresh.

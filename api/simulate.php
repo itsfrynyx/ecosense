@@ -8,11 +8,15 @@ require_once __DIR__ . '/../includes/auth.php';
 
 ensure_session();
 require_login();
+require_role(['admin', 'operator']);
+if (!db_available()) json_response(['ok' => false, 'error' => 'Database not available'], 503);
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    header('Allow: POST');
     echo json_encode(['ok' => false, 'error' => 'Method not allowed'], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -43,6 +47,7 @@ if ($deviceUid === '') {
 $device = null;
 if ($deviceUid !== '') {
     $device = db_one('SELECT id, device_uid FROM devices WHERE device_uid = ? LIMIT 1', [$deviceUid]);
+    if (!$device) json_response(['ok' => false, 'error' => 'Device not found'], 404);
 }
 if (!$device) {
     $device = db_one('SELECT id, device_uid FROM devices ORDER BY device_uid ASC LIMIT 1');
@@ -61,20 +66,16 @@ $tod = ($hour * 60 + $min + $second / 60.0) / (24.0 * 60.0) * 2 * pi();
 $offset = ($devId % 4) * 0.8;
 $temp = 24.0 + 4.0 * sin($tod) + $offset + (rand(-5, 5) / 10.0);
 $hum = 60.0 + 15.0 * cos($tod) + ($offset * 2) + (rand(-8, 8) / 10.0);
-$pres = 1010.0 + 3.0 * sin($tod + 0.5) + (rand(-10, 10) / 100.0);
-$lux = 8000.0 + 6000.0 * max(0, sin($tod)) + (rand(-2000, 2000));
-$batt = max(0, min(100, 85 + rand(-3, 3)));
 $signal = max(-120, min(0, -55 + rand(-5, 5)));
 
 $temp = round(max(-60, min(85, $temp)), 2);
 $hum = round(max(0, min(100, $hum)), 2);
-$pres = round(max(300, min(1200, $pres)), 2);
-$lux = round(max(0, min(200000, $lux)), 2);
 $heat = compute_heat_index($temp, $hum);
 if ($heat !== null) {
     $heat = round((float) $heat, 2);
 }
 
+$rain = random_int(0, 1);
 $recordedAt = date('Y-m-d H:i:s');
 $pdo = db();
 if ($pdo === null) {
@@ -83,8 +84,8 @@ if ($pdo === null) {
 }
 
 try {
-    $stmt = $pdo->prepare('INSERT INTO readings (device_id, recorded_at, temperature_c, humidity_pct, pressure_hpa, heat_index_c, lux, battery_pct, signal_dbm) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$devId, $recordedAt, $temp, $hum, $pres, $heat, $lux, $batt, $signal]);
+    $stmt = $pdo->prepare('INSERT INTO readings (device_id, recorded_at, temperature_c, humidity_pct, rain_detected, heat_index_c, signal_dbm) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$devId, $recordedAt, $temp, $hum, $rain, $heat, $signal]);
     $readingId = (int) $pdo->lastInsertId();
     $pdo->prepare('UPDATE devices SET last_seen_at = ?, status = ? WHERE id = ?')->execute([$recordedAt, 'online', $devId]);
 

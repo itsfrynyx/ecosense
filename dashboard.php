@@ -18,13 +18,12 @@ $ecoScripts  = ['assets/js/chart.js', 'assets/js/dashboard.js'];
 
 $ecoDbUp   = db_available();
 $ecoDbNote = $ecoDbUp ? '' : db_error();
+$ecoUnit = preferred_unit();
 
 $ecoWarnHigh = (float) setting('temp_warn_high', TEMP_WARN_HIGH);
 $ecoCritHigh = (float) setting('temp_crit_high', TEMP_CRIT_HIGH);
 $ecoWarnLow  = (float) setting('temp_warn_low', TEMP_WARN_LOW);
 $ecoHumHigh  = (float) setting('humidity_warn_high', HUMIDITY_WARN);
-$ecoPresLow  = (float) setting('pressure_warn_low', PRESSURE_LOW);
-$ecoBatWarn  = (int) setting('battery_warn_pct', BATTERY_WARN);
 $ecoPollMs   = (int) setting('dashboard_poll_ms', DASHBOARD_POLL_MS);
 if ($ecoPollMs < 1000) { $ecoPollMs = 3000; }
 
@@ -32,20 +31,15 @@ if ($ecoPollMs < 1000) { $ecoPollMs = 3000; }
 $ecoDevices = [];
 $ecoAlertRows = [];
 
-/**
- * Newest reading per device.
- * latest_readings() is the shared helper, but it selects d.battery_pct and
- * that column does not exist on devices — battery lives on readings. When the
- * helper comes back empty we query here so the dashboard still renders.
- */
+/** Newest DHT22 and rain reading per device. */
 if (!function_exists('eco_latest_readings')) {
     function eco_latest_readings()
     {
         $rows = db_all(
-            'SELECT d.id AS device_id, d.device_uid, d.name AS device_name, d.status, d.location,
-                    d.last_seen_at, NULL AS device_battery,
-                    r.recorded_at, r.temperature_c, r.humidity_pct, r.rain_raw, r.pressure_hpa,
-                    r.heat_index_c, r.lux, r.battery_pct, r.signal_dbm
+            'SELECT d.id AS device_id, d.device_uid, d.name, d.name AS device_name, d.status, d.location,
+                    d.last_seen_at,
+                    r.recorded_at, r.temperature_c, r.humidity_pct, r.rain_raw, r.rain_detected,
+                    r.heat_index_c, r.signal_dbm
              FROM devices d
              LEFT JOIN readings r ON r.id = (
                  SELECT id FROM readings WHERE device_id = d.id ORDER BY recorded_at DESC, id DESC LIMIT 1
@@ -72,7 +66,7 @@ if ($ecoDbUp) {
                     d.device_uid, d.name AS device_name
              FROM alerts a
              LEFT JOIN devices d ON d.id = a.device_id
-             ORDER BY a.triggered_at DESC, a.id DESC
+             WHERE a.metric IN ("temperature_c", "humidity_pct", "rain_detected") ORDER BY a.triggered_at DESC, a.id DESC
              LIMIT 6'
         );
     } catch (Throwable $ecoAlertErr) {
@@ -85,12 +79,13 @@ $ecoTotal      = count($ecoDeviceList);
 $ecoOnline     = 0;
 $ecoHasReading = false;
 
-foreach ($ecoDeviceList as $ecoD) {
-    $ecoD['status_effective'] = device_status_from_last_seen($ecoD['last_seen_at'], DEVICE_ONLINE_WINDOW);
+foreach ($ecoDeviceList as &$ecoD) {
+    $ecoD['status_effective'] = $ecoD['status'] === 'maintenance' ? 'maintenance' : device_status_from_last_seen($ecoD['last_seen_at'], DEVICE_ONLINE_WINDOW);
     if ($ecoD['status_effective'] === 'online') { $ecoOnline++; }
-    if ($ecoD['temperature_c'] !== null) { $ecoHasReading = true; }
+    if ($ecoD['temperature_c'] !== null || $ecoD['humidity_pct'] !== null || $ecoD['rain_detected'] !== null) { $ecoHasReading = true; }
 }
 
+unset($ecoD);
 $ecoPrimaryRow = null;
 if ($ecoDeviceList) {
     /* Prefer an online node with data; otherwise whatever exists. */
@@ -111,18 +106,18 @@ $ecoDeviceList = array_values($ecoDeviceList); /* keep the sorted order */
 
 /* ---- fleet means + 1h delta ------------------------------------------- */
 $ecoMeanTemp = $ecoMeanTempPast = null;
-$ecoMeanHum  = $ecoMeanPres = null;
+$ecoMeanHum = null;
 $ecoLastTemp = null;
 
 if ($ecoDbUp) {
-    $sumT = $sumH = $sumP = 0;
+    $sumT = $sumH = 0;
+    $nH = 0;
     $n = 0;
     $newest = null;
     foreach ($ecoDeviceList as $ecoD) {
+        if ($ecoD['humidity_pct'] !== null) { $sumH += (float) $ecoD['humidity_pct']; $nH++; }
         if ($ecoD['temperature_c'] === null) { continue; }
         $sumT += (float) $ecoD['temperature_c'];
-        $sumH += (float) $ecoD['humidity_pct'];
-        $sumP += (float) $ecoD['pressure_hpa'];
         $n++;
         $ts = $ecoD['recorded_at'] ? strtotime((string) $ecoD['recorded_at']) : 0;
         if ($ts && ($newest === null || $ts > $newest['ts'])) {
@@ -131,8 +126,7 @@ if ($ecoDbUp) {
     }
     if ($n > 0) {
         $ecoMeanTemp = $sumT / $n;
-        $ecoMeanHum  = $sumH / $n;
-        $ecoMeanPres = $sumP / $n;
+        $ecoMeanHum = $nH ? $sumH / $nH : null;
         $ecoLastTemp = $newest['v'];
     }
 
@@ -149,6 +143,7 @@ if ($ecoDbUp) {
     }
 }
 
+$ecoMeanHum = isset($nH) && $nH ? $sumH / $nH : null;
 $ecoDelta = ($ecoMeanTemp !== null && $ecoMeanTempPast !== null) ? ($ecoMeanTemp - $ecoMeanTempPast) : null;
 
 /* ---- 24h window for the primary node ---------------------------------- */
@@ -160,7 +155,7 @@ $ecoSeed = [
     'labels'     => [],
     'temperature_c' => [],
     'humidity_pct'  => [],
-    'pressure_hpa'  => [],
+    'rain_detected'  => [],
 ];
 
 foreach ($ecoDeviceList as $ecoD) {
@@ -171,17 +166,15 @@ foreach ($ecoDeviceList as $ecoD) {
         'status'     => (string) $ecoD['status_effective'],
         'last_seen'  => (string) ($ecoD['last_seen_at'] ?? ''),
         'last_ago'   => (int) (is_numeric($ecoD['recorded_at'] ?? null) ? $ecoD['recorded_at'] : (strtotime((string) ($ecoD['last_seen_at'] ?? '')) ?: 0)),
-        'battery'    => $ecoD['battery_pct'] === null ? null : (int) $ecoD['battery_pct'],
-        'signal'     => $ecoD['signal_dbm'] === null ? null : (int) $ecoD['signal_dbm'],
+        'signal_dbm' => $ecoD['signal_dbm'] === null ? null : (int) $ecoD['signal_dbm'],
         'temperature_c' => $ecoD['temperature_c'] === null ? null : (float) $ecoD['temperature_c'],
         'humidity_pct'  => $ecoD['humidity_pct'] === null ? null : (float) $ecoD['humidity_pct'],
         'rain_raw' => $ecoD['rain_raw'] === null ? null : (int) $ecoD['rain_raw'],
-        'pressure_hpa'  => $ecoD['pressure_hpa'] === null ? null : (float) $ecoD['pressure_hpa'],
+        'rain_detected'  => $ecoD['rain_detected'] === null ? null : (float) $ecoD['rain_detected'],
         'heat_index_c'  => $ecoD['heat_index_c'] === null ? null : (float) $ecoD['heat_index_c'],
-        'lux'        => $ecoD['lux'] === null ? null : (float) $ecoD['lux'],
         'spark_temp' => [],
         'spark_hum'  => [],
-        'spark_pres' => [],
+        'spark_rain' => [],
     ];
 }
 
@@ -189,7 +182,7 @@ foreach ($ecoSeries as $ecoPoint) {
     $ecoSeed['labels'][]        = $ecoPoint['label'];
     $ecoSeed['temperature_c'][] = $ecoPoint['temperature'];
     $ecoSeed['humidity_pct'][]  = $ecoPoint['humidity'];
-    $ecoSeed['pressure_hpa'][]  = $ecoPoint['pressure'];
+    $ecoSeed['rain_detected'][]  = $ecoPoint['rain'];
 }
 
 /* Per-node 40-sample sparkline tails, filled in the loop below. */
@@ -201,7 +194,7 @@ if ($ecoDbUp && $ecoTotal > 0) {
         foreach ($tail as $ecoP) {
             $t[] = $ecoP['temperature'];
             $h[] = $ecoP['humidity'];
-            $p[] = $ecoP['pressure'];
+            $p[] = $ecoP['rain'];
         }
         $ecoTails[(string) $ecoD['device_uid']] = ['t' => $t, 'h' => $h, 'p' => $p];
     }
@@ -210,13 +203,14 @@ foreach ($ecoSeed['devices'] as $ecoIdx => $ecoRow) {
     $uid = $ecoRow['uid'];
     $ecoSeed['devices'][$ecoIdx]['spark_temp'] = $ecoTails[$uid]['t'] ?? [];
     $ecoSeed['devices'][$ecoIdx]['spark_hum']  = $ecoTails[$uid]['h'] ?? [];
-    $ecoSeed['devices'][$ecoIdx]['spark_pres'] = $ecoTails[$uid]['p'] ?? [];
+    $ecoSeed['devices'][$ecoIdx]['spark_rain'] = $ecoTails[$uid]['p'] ?? [];
 }
 
 $ecoConfig = [
     'poll'       => $ecoPollMs,
     'latest'     => url('api/latest.php'),
     'history'    => url('api/history.php'),
+    'historyPage' => url('history.php'),
     'unit'       => $ecoUnit,
     'primary'    => $ecoUid,
     'thresholds' => [
@@ -224,8 +218,6 @@ $ecoConfig = [
         'tempCritHigh' => $ecoCritHigh,
         'tempWarnLow'  => $ecoWarnLow,
         'humidityHigh' => $ecoHumHigh,
-        'pressureLow'  => $ecoPresLow,
-        'batteryWarn'  => $ecoBatWarn,
     ],
     'ranges' => ['1h' => '1H', '6h' => '6H', '24h' => '24H', '7d' => '7D'],
     'dbUp'   => $ecoDbUp,
@@ -277,40 +269,17 @@ include __DIR__ . '/includes/header.php';
   </article>
 
   
-  <article class="kpi eco-rain-panel" aria-label="Rain sensor digital wet or dry reading">
+  <article class="kpi eco-rain-panel" aria-label="Rain detection status">
     <div class="kpi__main">
       <h2 class="kpi__label"><?= icon('rain') ?> Rain sensor</h2>
       <p class="kpi__value">
         <span id="eco-rain-value">—</span>
       </p>
-      <p class="kpi__foot" title="Adjust the sensor module potentiometer to set the wet detection threshold. This detects plate moisture, not a rain forecast.">Digital input · Wet / Dry</p>
+      <p class="kpi__foot" title="The sensor can remain triggered while the plate is wet after rain stops.">Based on sensor plate moisture.</p>
       <p class="kpi__foot" id="eco-rain-device" role="status">Waiting for sensor data</p>
     </div>
   </article>
-<script>
-(function(){
-  async function refreshRain(){
-    try {
-      const r = await fetch('api/latest.php', {cache:'no-store'});
-      if (!r.ok) throw new Error('HTTP '+r.status);
-      const json = await r.json();
-      if (!json.ok) throw new Error('Telemetry unavailable');
-      const devices = json.devices || [];
-      const d = devices.find(x => x.device_uid === 'ECO-ESP8266-01' && x.rain_detected != null)
-        || devices.find(x => x.rain_detected != null)
-        || devices.find(x => x.device_uid === 'ECO-ESP8266-01');
-      document.getElementById('eco-rain-value').textContent = d && d.rain_detected != null ? (Number(d.rain_detected) === 1 ? 'Wet' : 'Dry') : '—';
-      document.getElementById('eco-rain-device').textContent = d
-        ? (d.rain_detected == null ? 'Waiting for digital sensor data' : d.name)
-        : 'Register a rain sensor node';
-    } catch(e) {
-      document.getElementById('eco-rain-value').textContent = '—';
-      document.getElementById('eco-rain-device').textContent = 'Connection unavailable';
-    }
-  }
-  refreshRain(); setInterval(refreshRain, 5000);
-})();
-</script>
+
 
 <!-- 2. Humidity -->
   <article class="kpi kpi--violet">
@@ -329,19 +298,6 @@ include __DIR__ . '/includes/header.php';
       </p>
     </div>
     <div class="kpi__spark" data-spark="humidity" data-spark-color="violet" aria-hidden="true"></div>
-  </article>
-
-  <!-- 3. Pressure -->
-  <article class="kpi kpi--good">
-    <div class="kpi__main">
-      <h2 class="kpi__label"><?= icon('gauge') ?> Pressure</h2>
-      <p class="kpi__value">
-        <span data-kpi="pressure"><?= e(h($ecoMeanPres, 1)) ?></span>
-        <span class="kpi__unit">hPa</span>
-      </p>
-      <p class="kpi__foot"><span>floor <?= e(h($ecoPresLow, 0)) ?> hPa</span></p>
-    </div>
-    <div class="kpi__spark" data-spark="pressure" data-spark-color="good" aria-hidden="true"></div>
   </article>
 
   <!-- 4. Active nodes -->
@@ -442,8 +398,8 @@ include __DIR__ . '/includes/header.php';
   </div>
 </section>
 
-<!-- ═══ Humidity + pressure ═══════════════════════════════════════════ -->
-<section class="grid grid--split">
+<!-- ═══ Humidity and rain ═══════════════════════════════════════════ -->
+<section class="grid">
   <div class="card">
     <div class="card__head">
       <h2 class="card__title"><?= icon('droplet') ?> Relative humidity</h2>
@@ -464,25 +420,7 @@ include __DIR__ . '/includes/header.php';
     </div>
   </div>
 
-  <div class="card">
-    <div class="card__head">
-      <h2 class="card__title"><?= icon('gauge') ?> Barometric pressure</h2>
-      <p class="card__sub">hPa</p>
-    </div>
-    <div class="card__body card__body--flush" style="padding:18px 18px 4px">
-      <?php if ($ecoReady): ?>
-        <div class="chart chart--lg" data-chart="pressure" role="img" aria-label="Barometric pressure over time"></div>
-      <?php else: ?>
-        <div class="empty" data-empty="pressure" style="padding:34px 12px">
-          <span class="empty__ico" aria-hidden="true"><?= icon('gauge') ?></span>
-          <p class="empty__body">No barometric samples recorded yet.</p>
-        </div>
-      <?php endif; ?>
-    </div>
-    <div class="legend" data-legend="pressure">
-      <span class="legend__item"><span class="legend__swatch" style="background:var(--lime)"></span>Pressure</span>
-    </div>
-  </div>
+<div class="card"><div class="card__head"><h2 class="card__title">Rain detection history</h2><p class="card__sub">0 = dry; 1 = wet</p></div><div class="card__body"><div class="chart chart--lg" data-chart="rain" role="img" aria-label="Rain detection over time"></div><p>The plate detects wetness; rainfall amount is not measured.</p></div></div>
 </section>
 
 <!-- ═══ Fleet table + alerts ══════════════════════════════════════════ -->
@@ -503,7 +441,7 @@ include __DIR__ . '/includes/header.php';
                 <th scope="col">Location</th>
                 <th scope="col">Status</th>
                 <th scope="col">Last seen</th>
-                <th scope="col" class="num">Battery</th>
+                <th scope="col" class="num">Rain</th>
                 <th scope="col" class="num">Signal</th>
                 <th scope="col" class="num">Temp</th>
                 <th scope="col" class="num"><span class="visually-hidden">Actions</span></th>
@@ -512,8 +450,6 @@ include __DIR__ . '/includes/header.php';
             <tbody data-device-rows>
             <?php foreach ($ecoDeviceList as $ecoD):
                 $ecoUidCur = (string) $ecoD['device_uid'];
-                $ecoBat   = $ecoD['battery_pct'] === null ? null : (int) $ecoD['battery_pct'];
-                $ecoBatMod = $ecoBat === null ? '' : ($ecoBat <= $ecoBatWarn ? 'crit' : ($ecoBat <= ($ecoBatWarn * 2) ? 'warn' : ''));
                 $ecoSig   = $ecoD['signal_dbm'] === null ? null : (int) $ecoD['signal_dbm'];
                 $ecoSigMod = $ecoSig === null ? '' : ($ecoSig < -80 ? 'crit' : ($ecoSig < -65 ? 'warn' : ''));
             ?>
@@ -526,14 +462,7 @@ include __DIR__ . '/includes/header.php';
                 <td data-cell="status"><?= status_badge($ecoD['status_effective']) ?></td>
                 <td class="num"><span data-cell="seen" data-ago="<?= e((string) ($ecoD['last_seen_at'] ? strtotime((string) $ecoD['last_seen_at']) : 0)) ?>"><?= e(time_ago($ecoD['last_seen_at'])) ?></span></td>
                 <td class="num">
-                  <?php if ($ecoBat === null): ?>
-                    <span class="text-lo">—</span>
-                  <?php else: ?>
-                    <span class="meter<?= $ecoBatMod ? ' meter--' . $ecoBatMod : '' ?>" style="min-width:96px">
-                      <span class="meter__track"><span class="meter__fill" style="width:<?= e((string) max(0, min(100, $ecoBat))) ?>%"></span></span>
-                      <span class="meter__val"><?= e((string) $ecoBat) ?>%</span>
-                    </span>
-                  <?php endif; ?>
+                  <span data-cell="rain"><?= $ecoD['rain_detected'] === null ? '—' : ((int) $ecoD['rain_detected'] === 1 ? 'Wet' : 'Dry') ?></span>
                 </td>
                 <td class="num">
                   <?php if ($ecoSig === null): ?>
@@ -562,7 +491,7 @@ include __DIR__ . '/includes/header.php';
           <span class="empty__ico" aria-hidden="true"><?= icon('chip') ?></span>
           <h3 class="empty__title">No nodes registered</h3>
           <p class="empty__body">
-            Register an ESP32 node from the Devices page, then post its first sample to
+            Register an ESP8266 or ESP32 node from the Devices page, then post its first sample to
             <code><?= e(url('api/simulate.php')) ?></code>.
           </p>
         </div>

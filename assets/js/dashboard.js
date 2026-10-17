@@ -16,7 +16,7 @@
     try { return JSON.parse(node.textContent); } catch (err) { return fallback; }
   }
 
-  var SEED = readJson('ecoSeed', { devices: [], labels: [], temperature_c: [], humidity_pct: [], pressure_hpa: [] });
+  var SEED = readJson('ecoSeed', { devices: [], labels: [], temperature_c: [], humidity_pct: [], rain_detected: [] });
   var CFG = readJson('ecoConfig', { poll: 3000, ranges: {} });
 
   var POLL = Math.max(1000, parseInt(CFG.poll, 10) || 3000);
@@ -32,12 +32,15 @@
       labels: (SEED.labels || []).slice(),
       temperature_c: (SEED.temperature_c || []).slice(),
       humidity_pct: (SEED.humidity_pct || []).slice(),
-      pressure_hpa: (SEED.pressure_hpa || []).slice()
+      rain_detected: (SEED.rain_detected || []).slice()
     },
     devices: {},
     connected: !!CFG.dbUp,
     failures: 0,
     timer: 0,
+    historyRequest: 0,
+    historyPending: null,
+    historySample: null,
     inFlight: false
   };
 
@@ -58,6 +61,8 @@
 
   /* ---- unit math ------------------------------------------------------- */
   function toF(c) { return (c * 9 / 5) + 32; }
+  function tempValue(c) { return c == null ? null : (state.unit === 'f' ? toF(c) : c); }
+  function temperatureValues() { return state.series.temperature_c.map(tempValue); }
   function disp(c, decimals) {
     if (c === null || c === undefined || c === '') { return '--'; }
     var v = parseFloat(c);
@@ -92,14 +97,22 @@
     return n;
   }
 
+  function paintRain() {
+    var d = state.devices[state.node];
+    var value = doc.getElementById('eco-rain-value');
+    var note = doc.getElementById('eco-rain-device');
+    if (value) value.textContent = !d || d.rain_detected == null ? 'Unavailable' : (Number(d.rain_detected) === 1 ? 'Rain detected' : 'No rain detected');
+    if (note) note.textContent = !state.connected ? 'Connection unavailable; last reading' : d ? d.name + (d.status === 'online' ? '' : ' · offline; last reading') : 'Select a sensor node';
+  }
+
   function paintKpis() {
-    var temps = [], hums = [], pres = [];
+    paintRain();
+    var temps = [], hums = [];
     Object.keys(state.devices).forEach(function (uid) {
       var d = state.devices[uid];
+      if (d.humidity_pct != null) hums.push(parseFloat(d.humidity_pct));
       if (d.temperature_c !== null && d.temperature_c !== undefined) {
         temps.push(parseFloat(d.temperature_c));
-        hums.push(parseFloat(d.humidity_pct));
-        pres.push(parseFloat(d.pressure_hpa));
       }
     });
 
@@ -109,8 +122,6 @@
     if (tNode) { tNode.textContent = disp(avg(temps)); }
     var hNode = q('[data-kpi="humidity"]');
     if (hNode) { hNode.textContent = hums.length ? avg(hums).toFixed(1) : '--'; }
-    var pNode = q('[data-kpi="pressure"]');
-    if (pNode) { pNode.textContent = pres.length ? avg(pres).toFixed(1) : '--'; }
 
     var nNode = q('[data-kpi="nodes"]');
     var online = onlineCount();
@@ -125,7 +136,6 @@
 
     pushSpark('temp', temps);
     pushSpark('humidity', hums);
-    pushSpark('pressure', pres);
     pushSpark('nodes', nodesTally());
   }
 
@@ -156,15 +166,34 @@
 
   function seriesConfig() {
     return {
+      xLabel: 'Time (Asia/Manila)',
+      yLabel: 'Temperature',
+      time12Hour: true,
+      endpointLabels: true,
       labels: state.series.labels,
       window: RANGE_POINTS[state.range] || 360,
       series: [
-        { key: 'temperature_c', label: 'Temperature', unit: unitSymbol(), color: CHARTS.accent, values: state.series.temperature_c, decimals: 1 }
+        { key: 'temperature_c', label: 'Temperature', unit: unitSymbol(), color: CHARTS.accent, values: temperatureValues(), decimals: 2 }
       ]
     };
   }
 
   function buildCharts() {
+    // Turn the server's initial placeholders into chart hosts, so the first
+    // sensor packet can populate an empty dashboard without a page reload.
+    [['chart', 'temperature'], ['humidity', 'humidity'], ['gauge', null]].forEach(function (item) {
+      var empty = q('[data-empty="' + item[0] + '"]');
+      if (!empty) return;
+      var host = doc.createElement('div');
+      if (item[1]) {
+        host.className = 'chart chart--lg';
+        host.setAttribute('data-chart', item[1]);
+      } else {
+        host.className = 'gauge';
+        host.setAttribute('data-gauge', '');
+      }
+      empty.replaceWith(host);
+    });
     var t = q('[data-chart="temperature"]');
     if (t) {
       lines.temperature = win.EcoChart.line(t, seriesConfig());
@@ -173,20 +202,25 @@
     var h = q('[data-chart="humidity"]');
     if (h) {
       lines.humidity = win.EcoChart.line(h, {
+        xLabel: 'Time (Asia/Manila)',
+        yLabel: 'Relative humidity',
+        time12Hour: true,
+        endpointLabels: true,
         labels: state.series.labels,
         window: RANGE_POINTS[state.range],
-        series: [{ key: 'humidity_pct', label: 'Humidity', unit: '%RH', color: CHARTS.violet, values: state.series.humidity_pct, decimals: 1 }]
+        series: [{ key: 'humidity_pct', label: 'Humidity', unit: '%RH', color: CHARTS.violet, values: state.series.humidity_pct, decimals: 2 }]
       });
       lines.humidity.opts.window = RANGE_POINTS[state.range];
     }
-    var p = q('[data-chart="pressure"]');
+    var p = q('[data-chart="rain"]');
     if (p) {
-      lines.pressure = win.EcoChart.line(p, {
+      lines.rain = win.EcoChart.line(p, {
+        yMin: 0, yMax: 1, decimals: 2, yLabel: 'Rain detection',
         labels: state.series.labels,
         window: RANGE_POINTS[state.range],
-        series: [{ key: 'pressure_hpa', label: 'Pressure', unit: 'hPa', color: CHARTS.lime, values: state.series.pressure_hpa, decimals: 1 }]
+        series: [{ key: 'rain_detected', label: 'Rain', unit: '0=dry, 1=wet', stepped: true, fill: false, color: CHARTS.lime, values: state.series.rain_detected, decimals: 1 }]
       });
-      lines.pressure.opts.window = RANGE_POINTS[state.range];
+      lines.rain.opts.window = RANGE_POINTS[state.range];
     }
     paintGauge();
   }
@@ -194,7 +228,7 @@
   function repaintCharts() {
     if (lines.temperature) {
       lines.temperature.opts.labels = state.series.labels;
-      lines.temperature.opts.series[0].values = state.series.temperature_c;
+      lines.temperature.opts.series[0].values = temperatureValues();
       lines.temperature.opts.series[0].unit = unitSymbol();
       lines.temperature.update({ labels: state.series.labels, series: lines.temperature.opts.series, window: RANGE_POINTS[state.range] }, true);
     }
@@ -202,9 +236,9 @@
       lines.humidity.opts.series[0].values = state.series.humidity_pct;
       lines.humidity.update({ labels: state.series.labels, series: lines.humidity.opts.series, window: RANGE_POINTS[state.range] }, true);
     }
-    if (lines.pressure) {
-      lines.pressure.opts.series[0].values = state.series.pressure_hpa;
-      lines.pressure.update({ labels: state.series.labels, series: lines.pressure.opts.series, window: RANGE_POINTS[state.range] }, true);
+    if (lines.rain) {
+      lines.rain.opts.series[0].values = state.series.rain_detected;
+      lines.rain.update({ labels: state.series.labels, series: lines.rain.opts.series, window: RANGE_POINTS[state.range] }, true);
     }
   }
 
@@ -215,16 +249,16 @@
     var temp = dev && dev.temperature_c !== null && dev.temperature_c !== undefined ? parseFloat(dev.temperature_c) : null;
 
     var opts = {
-      value: temp === null || isNaN(temp) ? 0 : temp,
-      min: -5,
-      max: 45,
+      value: temp === null || isNaN(temp) ? null : tempValue(temp),
+      min: tempValue(-5),
+      max: tempValue(45),
       unit: unitSymbol(),
       decimals: 1,
       label: dev ? dev.name : 'no node',
       thresholds: [
-        { at: parseFloat(TH.tempCritHigh || 38), color: CHARTS.crit },
-        { at: parseFloat(TH.tempWarnHigh || 32), color: CHARTS.warn },
-        { at: parseFloat(TH.tempWarnLow || 12), color: CHARTS.accent }
+        { at: tempValue(Number(TH.tempCritHigh == null ? 38 : TH.tempCritHigh)), color: CHARTS.crit },
+        { at: tempValue(Number(TH.tempWarnHigh == null ? 32 : TH.tempWarnHigh)), color: CHARTS.warn },
+        { at: tempValue(Number(TH.tempWarnLow == null ? 12 : TH.tempWarnLow)), color: CHARTS.accent }
       ]
     };
 
@@ -283,8 +317,9 @@
       '<td class="num"><span data-cell="temp">—</span> <span class="kpi__unit"></span></td>' +
       '<td class="num"><span class="row-actions">' +
       '<a class="icon-btn" href="#">' + ico('history') + '</a>' +
-      '<button type="button" class="icon-btn" data-focus-node="' + d.uid + '">' + ico('target') + '</button>' +
+      '<button type="button" class="icon-btn" data-focus-node>' + ico('target') + '</button>' +
       '</span></td>';
+    tr.querySelector('[data-focus-node]').setAttribute('data-focus-node', d.uid);
     rows.appendChild(tr);
     bindRowActions(tr);
     return tr;
@@ -294,7 +329,7 @@
     var link = tr.querySelector('.row-actions a');
     if (link) {
       link.setAttribute('aria-label', 'Open history for ' + d.uid);
-      link.setAttribute('href', CFG.history + '?device_uid=' + encodeURIComponent(d.uid));
+      link.setAttribute('href', (CFG.historyPage || 'history.php') + '?device_uid=' + encodeURIComponent(d.uid));
     }
     var btn = tr.querySelector('[data-focus-node]');
     if (btn) { btn.setAttribute('aria-label', 'Focus ' + d.uid + ' on the charts'); }
@@ -335,9 +370,7 @@
 
     var tds = tr.children;
     if (tds[4]) {
-      tds[4].innerHTML = d.battery_pct === null || d.battery_pct === undefined
-        ? '<span class="text-lo">—</span>'
-        : meterHtml(parseInt(d.battery_pct, 10), parseInt(TH.batteryWarn || 25, 10));
+      tds[4].textContent = d.rain_detected == null ? '—' : (Number(d.rain_detected) === 1 ? 'Wet' : 'Dry');
     }
     if (tds[5]) {
       tds[5].innerHTML = d.signal_dbm === null || d.signal_dbm === undefined
@@ -372,7 +405,11 @@
   }
 
   function syncNodeSelect(uids) {
-    if (!nodeSelect || nodeSelect.disabled) { return; }
+    if (!nodeSelect) { return; }
+    nodeSelect.disabled = !uids.length;
+    Array.prototype.slice.call(nodeSelect.options).forEach(function (option) {
+      if (uids.indexOf(option.value) < 0) option.remove();
+    });
     var have = {};
     Array.prototype.forEach.call(nodeSelect.options, function (o) { have[o.value] = true; });
 
@@ -390,7 +427,13 @@
   /* ---- node selection -------------------------------------------------- */
   function setNode(uid, refetch) {
     if (!uid) { return; }
+    var changed = state.node !== uid;
     state.node = uid;
+    if (changed) {
+      state.historySample = null;
+      state.series = { labels: [], temperature_c: [], humidity_pct: [], rain_detected: [] };
+      repaintCharts();
+    }
     if (nodeSelect) { nodeSelect.value = uid; }
     if (chartSub) {
       var d = state.devices[uid];
@@ -399,13 +442,19 @@
     var hint = nodeSelect ? nodeSelect.parentNode.querySelector('.field__hint') : null;
     if (hint && state.devices[uid]) { hint.textContent = state.devices[uid].location || ''; }
     paintGauge();
+    paintRain();
     if (refetch) { loadHistory(state.range, uid); }
   }
 
   /* ---- history fetch --------------------------------------------------- */
   function loadHistory(range, uid) {
     if (!uid) { return; }
-    var url = CFG.history + '?device_uid=' + encodeURIComponent(uid) + '&range=' + encodeURIComponent(range);
+    var key = uid + ':' + range;
+    if (state.historyPending === key) return;
+    state.historyPending = key;
+    var request = ++state.historyRequest;
+    var sample = state.devices[uid] && state.devices[uid].last_seen_at;
+    var url = CFG.history + '?device_uid=' + encodeURIComponent(uid) + '&range=' + encodeURIComponent(range) + '&limit=600';
     win.fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
       .then(function (res) {
         if (!res.ok) { throw new Error('history ' + res.status); }
@@ -413,10 +462,14 @@
       })
       .then(function (data) {
         if (!data || data.ok !== true) { throw new Error('bad payload'); }
+        if (request !== state.historyRequest) return;
+        state.historyPending = null;
+        if (uid !== state.node || range !== state.range) return;
+        state.historySample = key + ':' + sample;
         applyHistory(data);
       })
       .catch(function () {
-        /* history is optional chrome: keep the live series if it fails */
+        if (request === state.historyRequest) state.historyPending = null;
       });
   }
 
@@ -427,7 +480,7 @@
     state.series.labels = data.labels || [];
     state.series.temperature_c = series.temperature_c || [];
     state.series.humidity_pct = series.humidity_pct || [];
-    state.series.pressure_hpa = series.pressure_hpa || [];
+    state.series.rain_detected = series.rain_detected || [];
 
     if (chartSub) { chartSub.textContent = (data.device_uid || state.node) + ' · ' + (data.range || state.range); }
     repaintCharts();
@@ -443,7 +496,7 @@
       state.range = btn.getAttribute('data-range');
       if (lines.temperature) { lines.temperature.opts.window = RANGE_POINTS[state.range]; }
       if (lines.humidity) { lines.humidity.opts.window = RANGE_POINTS[state.range]; }
-      if (lines.pressure) { lines.pressure.opts.window = RANGE_POINTS[state.range]; }
+      if (lines.rain) { lines.rain.opts.window = RANGE_POINTS[state.range]; }
       loadHistory(state.range, state.node);
     });
   });
@@ -457,6 +510,7 @@
   /* ---- connection state ------------------------------------------------ */
   function setConnection(ok) {
     state.connected = ok;
+    paintRain();
     if (!liveChip || !liveText) { return; }
     liveChip.classList.toggle('is-warn', !ok);
     liveChip.classList.toggle('is-off', false);
@@ -468,7 +522,7 @@
     if (state.inFlight) { return; }
     state.inFlight = true;
 
-    win.fetch(CFG.latest, { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'same-origin' })
+    win.fetch(CFG.latest + (CFG.latest.indexOf('?') < 0 ? '?' : '&') + 'series=0', { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'same-origin' })
       .then(function (res) {
         if (!res.ok) { throw new Error('latest ' + res.status); }
         return res.json();
@@ -488,6 +542,7 @@
   }
 
   function ingest(data) {
+    var nextDevices = {};
     (data.devices || []).forEach(function (raw) {
       /* api/latest.php keys the identifier as device_uid; the seed uses uid. */
       var d = raw;
@@ -499,38 +554,27 @@
         d.uid = raw.device_uid;
       }
       if (!d.uid) { return; }
-      state.devices[d.uid] = d;
+      nextDevices[d.uid] = d;
     });
 
+    state.devices = nextDevices;
+    if (rows) qa('[data-device-rows] tr[data-row]').forEach(function (row) {
+      if (!nextDevices[row.getAttribute('data-row')]) row.remove();
+    });
     var live = data.devices || [];
+    if (!nextDevices[state.node]) {
+      state.node = '';
+      state.historySample = null;
+      state.series = { labels: [], temperature_c: [], humidity_pct: [], rain_detected: [] };
+      repaintCharts();
+      if (live.length) setNode(live[0].device_uid, true);
+    }
     var focus = state.devices[state.node];
 
-    /* append the newest sample to the live traces */
-    if (focus && focus.series && focus.series.labels && focus.series.labels.length) {
-      var s = focus.series;
-      state.series.labels = s.labels.slice();
-      state.series.temperature_c = (s.temperature_c || []).slice();
-      state.series.humidity_pct = (s.humidity_pct || []).slice();
-      state.series.pressure_hpa = (s.pressure_hpa || []).slice();
-
-      if (lines.temperature) {
-        lines.temperature.opts.series[0].values = state.series.temperature_c;
-        lines.temperature.opts.series[0].unit = unitSymbol();
-        lines.temperature.update({ labels: state.series.labels, series: lines.temperature.opts.series }, true);
-      }
-      if (lines.humidity) {
-        lines.humidity.opts.series[0].values = state.series.humidity_pct;
-        lines.humidity.update({ labels: state.series.labels, series: lines.humidity.opts.series }, true);
-      }
-      if (lines.pressure) {
-        lines.pressure.opts.series[0].values = state.series.pressure_hpa;
-        lines.pressure.update({ labels: state.series.labels, series: lines.pressure.opts.series }, true);
-      }
-    } else if (live.length && !state.node) {
-      state.node = live[0].device_uid;
-      setNode(state.node, true);
+    // Refresh the selected period only when that node reports a new reading.
+    if (focus && state.historySample !== state.node + ':' + state.range + ':' + focus.last_seen_at) {
+      loadHistory(state.range, state.node);
     }
-
     paintKpis();
     paintDevices();
     paintGauge();
@@ -539,6 +583,8 @@
       state.unit = data.units;
       body.setAttribute('data-unit', state.unit);
       if (win.EcoUnits) { win.EcoUnits.apply(state.unit, true); }
+      repaintCharts();
+      paintGauge();
     }
   }
 
@@ -548,10 +594,9 @@
     var temps = [], hums = [], pres = [];
     Object.keys(state.devices).forEach(function (uid) {
       var d = state.devices[uid];
+      if (d.humidity_pct != null) hums.push(parseFloat(d.humidity_pct));
       if (d.temperature_c === null || d.temperature_c === undefined) { return; }
       temps.push(parseFloat(d.temperature_c));
-      hums.push(parseFloat(d.humidity_pct));
-      pres.push(parseFloat(d.pressure_hpa));
     });
     var avg = function (a) { return a.length ? a.reduce(function (x, y) { return x + y; }, 0) / a.length : null; };
 
@@ -559,8 +604,6 @@
     if (tNode) { tNode.textContent = disp(avg(temps)); }
     var hNode = q('[data-kpi="humidity"]');
     if (hNode) { hNode.textContent = hums.length ? avg(hums).toFixed(1) : '--'; }
-    var pNode = q('[data-kpi="pressure"]');
-    if (pNode) { pNode.textContent = pres.length ? avg(pres).toFixed(1) : '--'; }
 
     Object.keys(state.devices).forEach(function (uid) { paintRow(state.devices[uid]); });
     paintKpis();
@@ -578,7 +621,7 @@
   qa('[data-device-rows] tr[data-row]').forEach(bindRowActions);
   paintKpis();
   paintDevices();
-  setNode(state.node, false);
+  setNode(state.node, true);
 
   if (state.connected) {
     poll();

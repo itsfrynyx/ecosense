@@ -2,6 +2,7 @@
 require_once __DIR__ . '/includes/auth.php';
 
 require_login();
+$canManageDevices = user_has_role('admin');
 
 $ecoTitle = 'Devices';
 $ecoNavKey = 'devices';
@@ -13,6 +14,7 @@ $errors = [];
 $success = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
+    require_role('admin');
     $action = isset($_POST['action']) ? trim((string)$_POST['action']) : '';
     $deviceId = isset($_POST['device_id']) ? (int)$_POST['device_id'] : 0;
     $name = trim((string)($_POST['name'] ?? ''));
@@ -82,7 +84,7 @@ require __DIR__ . '/includes/header.php';
       <p class="lede">Register and manage sensor nodes. Copy ingest URL and curl snippet to test.</p>
     </div>
     <div class="page-head__actions">
-      <button type="button" class="btn btn--primary" data-modal-open="modalDeviceCreate"><?= icon('plus') ?> Register device</button>
+      <?php if ($canManageDevices): ?><button type="button" class="btn btn--primary" data-modal-open="modalDeviceCreate"><?= icon('plus') ?> Register device</button><?php endif; ?>
       <button type="button" class="btn btn--ghost" data-simulate><?= icon('zap') ?> Send test reading</button>
     </div>
   </div>
@@ -97,7 +99,7 @@ require __DIR__ . '/includes/header.php';
             <th>Location</th>
             <th>Status</th>
             <th>Last seen</th>
-            <th>Battery</th>
+            <th>Rain</th>
             <th>Signal</th>
             <th>Temp (°C)</th>
             <th>Actions</th>
@@ -112,9 +114,9 @@ require __DIR__ . '/includes/header.php';
           $lastSeen = $dev['last_seen_at'] ?? null;
           $status = device_status_from_last_seen($lastSeen);
           if ($dev['status'] === 'maintenance') $status = 'maintenance';
-          $latest = db_one('SELECT temperature_c, battery_pct, signal_dbm, recorded_at FROM readings WHERE device_id = ? ORDER BY recorded_at DESC, id DESC LIMIT 1', [$devId]);
+          $latest = db_one('SELECT temperature_c, rain_detected, signal_dbm, recorded_at FROM readings WHERE device_id = ? ORDER BY recorded_at DESC, id DESC LIMIT 1', [$devId]);
           $temp = $latest['temperature_c'] ?? null;
-          $batt = $latest['battery_pct'] ?? null;
+          $rain = $latest['rain_detected'] ?? null;
           $sig = $latest['signal_dbm'] ?? null;
           $ls = $latest['recorded_at'] ?? $lastSeen;
         ?>
@@ -124,11 +126,12 @@ require __DIR__ . '/includes/header.php';
             <td><?= e($dev['location'] ?? '') ?></td>
             <td><?= status_badge($status) ?></td>
             <td class="mono"><?= e($ls ?? '') ?></td>
-            <td class="mono num"><?= $batt !== null ? e((string)$batt) . '%' : '—' ?></td>
+            <td class="mono num"><?= $rain !== null ? ((int)$rain === 1 ? 'Wet' : 'Dry') : '—' ?></td>
             <td class="mono num"><?= $sig !== null ? e((string)$sig) : '—' ?></td>
             <td class="mono num"><?= $temp !== null ? e(number_format((float)$temp,1,'.','')) : '—' ?></td>
             <td class="actions">
-              <button class="btn btn--ghost btn--sm" data-edit-device='<?= json_encode(['id'=>$devId,'device_uid'=>$dev['device_uid'],'name'=>$dev['name'],'location'=>$dev['location'],'firmware'=>$dev['firmware'],'api_key'=>$dev['api_key']]) ?>'>Edit</button>
+              <?php if ($canManageDevices): ?>
+              <button class="btn btn--ghost btn--sm" data-edit-device='<?= e(json_encode(['id'=>$devId,'device_uid'=>$dev['device_uid'],'name'=>$dev['name'],'location'=>$dev['location'],'firmware'=>$dev['firmware'],'api_key'=>$dev['api_key']])) ?>'>Edit</button>
               <button class="btn btn--ghost btn--sm" data-rotate-device="<?= $devId ?>">Rotate key</button>
               <button class="btn btn--ghost btn--sm" data-copy-snippet='<?= e(json_encode(['device_uid'=>$dev['device_uid'],'api_key'=>$dev['api_key']])) ?>'>View API key / snippet</button>
               <form method="post" style="display:inline" onsubmit="return confirm('Delete device?')">
@@ -137,6 +140,7 @@ require __DIR__ . '/includes/header.php';
                 <input type="hidden" name="device_id" value="<?= $devId ?>">
                 <button type="submit" class="btn btn--ghost">Delete</button>
               </form>
+              <?php else: ?><span class="text-lo">Read only</span><?php endif; ?>
             </td>
           </tr>
         <?php endforeach; ?>

@@ -44,7 +44,7 @@ $ecoFavicon = 'data:image/svg+xml,'
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0B0E13">
 <title><?= e($ecoTitle) ?></title>
-<meta name="description" content="EcoSense — an ESP32 sensor mesh that streams temperature, humidity, pressure and lux over Wi-Fi into a PHP/MySQL ingest API and a live monitoring dashboard.">
+<meta name="description" content="EcoSense — an DHT22 and rain monitoring system that streams temperature, humidity and rain detection over Wi-Fi into a PHP/MySQL ingest API and a live monitoring dashboard.">
 <meta name="author" content="<?= e(APP_AUTHOR) ?>">
 <?php foreach ($ecoMeta as $name => $content): ?>
 <meta name="<?= e($name) ?>" content="<?= e($content) ?>">
@@ -62,4 +62,4 @@ $ecoFavicon = 'data:image/svg+xml,'
 <link rel="stylesheet" href="<?= e(asset($style)) ?>">
 <?php endforeach; ?>
 </head>
-<body class="page <?= e($ecoIsLanding ? 'page--landing' : 'page--app') ?> <?= e($ecoBodyClass) ?>">
+<body class="page <?= e($ecoIsLanding ? 'page--landing' : 'page--app') ?> <?= e($ecoBodyClass) ?>" data-unit="<?= e($ecoUnit ?? preferred_unit()) ?>">

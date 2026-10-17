@@ -2,6 +2,6 @@
 const char* WIFI_SSID     = "YOUR_WIFI_SSID";
 const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
 const char* API_HOST      = "http://192.168.254.110"; // e.g. http://192.168.1.100
-const char* API_PATH      = "/ecosense%20an%20iot%20base%20system%20for%20Real%20time%20weather%20detection%20and%20temperature%20monitoring/api/ingest.php";
+const char* API_PATH = "/ecosenseV.2.1/api/ingest.php";
 const char* DEVICE_UID    = "ECO-TH-001";
 const char* DEVICE_APIKEY = "YOUR_DEVICE_API_KEY"; // match your device

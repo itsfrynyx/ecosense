@@ -1,50 +1,38 @@
-# EcoSense Device Firmware
+# EcoSense: DHT22 + digital rain sensor
 
-## Hardware
-- ESP32-WROOM-32 development board
-- DHT22 (AM2302) temperature/humidity sensor
-- BMP280 (or BME280) barometric pressure sensor
-- BH1750 ambient light sensor
-- DS18B20 waterproof probe (optional - can be added)
-- 18650 Li-ion + TP4056 charger (optional for battery operation)
-- 2.4GHz Wi-Fi network
+Use ecosense_esp8266.ino for ESP8266 NodeMCU. Use ecosense_node.esp32.ino only for ESP32. Create separate Arduino sketch folders and copy only the chosen .ino into each folder, otherwise Arduino compiles both setup()/loop() functions.
 
-## Wiring
-| Component | ESP32 Pin | Notes |
-|-----------|-----------|-------|
-| DHT22 | GPIO4 | Pullup 4.7kΩ recommended |
-| BMP280/BME280 (I2C) | SDA=GPIO21, SCL=GPIO22 | 3.3V logic |
-| BH1750 (I2C) | SDA=GPIO21, SCL=GPIO22 | 3.3V logic |
-| DS18B20 (optional) | GPIO5 | 4.7kΩ pullup if used |
-| Status LED | GPIO2 | Built-in LED |
+| Connection | ESP8266 NodeMCU | ESP32 alternative |
+| --- | --- | --- |
+| DHT22 DATA / OUT | D2 (GPIO4) | GPIO4 |
+| Rain module DO | D5 (GPIO14) | GPIO27 |
+| Sensor VCC | 3.3V | 3.3V |
+| Sensor GND | GND | GND |
+| Rain AO | Leave disconnected | Leave disconnected |
 
-## Required Libraries
-Install via Arduino IDE Library Manager:
-- DHT sensor library by Adafruit
-- Adafruit Unified Sensor
-- Adafruit BMP280 Library
-- BH1750 by Christopher Laws
-- ArduinoJson
+Disconnect power before wiring. Use a 4.7–10 kΩ pull-up between DHT22 DATA and 3.3V if your module does not include one. GPIO signals must stay at 3.3V.
 
-## Configuration
-Edit `ecosense_node.esp32.ino`:
-- `WIFI_SSID` / `WIFI_PASS` - your network credentials
-- `API_HOST` - IP/hostname of your XAMPP server (e.g., `http://192.168.1.100`)
-- `API_PATH` - full path to `api/ingest.php`
-- `DEVICE_UID` - must match a device in `devices` table
-- `DEVICE_APIKEY` - must match the device's API key (64 hex chars)
+## Arduino IDE
 
-## Operation
-1. Connect ESP32 via USB
-2. Open sketch in Arduino IDE
-3. Configure Wi-Fi and API details
-4. Upload to board
-5. Open Serial Monitor (115200 baud) to view logs
-6. Device posts readings every ~2 seconds, blinks LED on success/failure
-7. In battery mode, uses DeepSleep for ~2 seconds
+1. Install board support for your board. ESP8266 uses ESP8266WiFi / ESP8266HTTPClient; ESP32 uses WiFi / HTTPClient.
+2. Install Adafruit DHT sensor library and its Adafruit Unified Sensor dependency. The ESP8266 sketch also contains a fallback DHT22 reader.
+3. Paste the chosen complete .ino into a new sketch.
+4. Edit the placeholder settings at the top of the sketch. Alternatively, add a tab named esp8266_local.h (or esp32_local.h for ESP32) and copy the matching .h.example into it; this header overrides the inline settings.
+5. Set Wi-Fi credentials, laptop LAN IPv4, API URL/path, device UID and the matching API key from Devices. The URL is http://LAPTOP_IP/ecosenseV.2.1/api/ingest.php. Do not use localhost on the board.
+6. Select the matching board and port, then upload. Open Serial Monitor at 115200 baud.
 
-## OTA Stub
-The sketch includes a minimal `update_http()` stub for over-the-air updates. Extend as needed for your deployment.
+## Server
 
-## Testing
-After uploading, check `dashboard.php` or `api/latest.php` - readings should appear within a few seconds. The device updates `devices.last_seen_at` and sets status to `online` on successful ingest.
+Start Apache and MySQL in XAMPP. For a new database only, import database/schema.sql. For existing databases, run:
+
+C:\xamppni\php\php.exe database/setup_rain.php
+
+The migration adds missing rain columns, registers ECO-ESP8266-01 if absent, disables unsupported legacy rules, and adds a wet-plate rule when no rain rule exists. It preserves existing readings and credentials. Get the registered device key from Devices.
+
+Both sketches send temperature_c, humidity_pct, rain_detected and signal_dbm every five seconds. Heat index is calculated by the server from valid DHT22 readings. A failed DHT22 read becomes null; rain reporting continues.
+
+Rain: 0 = dry, 1 = wet, null = unavailable. DO is assumed LOW when wet. Adjust the module potentiometer; change RAIN_WET_LEVEL to HIGH only if your module behaves in reverse. This detects plate wetness, not rainfall volume or intensity; the plate may stay wet after rain stops.
+
+## Verify
+
+Check dry plate → Dry / No rain detected, wet plate → Wet / Rain detected. Verify temperature/humidity, selected-node rain status, history, CSV export and a rain alert rule (rain_detected >= 1). Disconnect DHT22 and confirm rain continues while DHT values become unavailable. Disconnect Wi-Fi and confirm the node becomes offline after the configured window.

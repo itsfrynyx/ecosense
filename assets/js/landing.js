@@ -304,7 +304,6 @@
     var channels = [
       { key: 'temp', icon: 'thermometer', label: 'Temperature', unit: '°C', value: 28.4, min: 24.5, max: 33.2, decimals: 1, step: 0.22, pull: 0.26, delta: 0.1 },
       { key: 'hum', icon: 'droplet', label: 'Humidity', unit: '%', value: 63.2, min: 48, max: 82, decimals: 1, step: 1.6, pull: 0.22, delta: -0.8 },
-      { key: 'pres', icon: 'gauge', label: 'Pressure', unit: 'hPa', value: 1008.4, min: 1002, max: 1016, decimals: 1, step: 0.32, pull: 0.24, delta: 0.2 }
     ];
 
     var packet = $('[data-packets]');

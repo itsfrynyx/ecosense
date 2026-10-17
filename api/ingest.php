@@ -1,7 +1,7 @@
 <?php
 /**
  * EcoSense device ingest endpoint.
- * Accepts JSON or form-encoded from ESP32 nodes. No human session required.
+ * Accepts JSON or form-encoded from ESP8266 / ESP32 DHT22 and rain nodes. No human session required.
  */
 
 define('ECOSENSE_INGEST', true);
@@ -41,6 +41,12 @@ function ingest_success($readingId, $alertsTriggered)
     exit;
 }
 
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    header('Allow: POST');
+    ingest_json_error(405, 'Method not allowed');
+}
+if (!db_available()) ingest_json_error(503, 'Database not available');
+
 $inputRaw = file_get_contents('php://input');
 $data = [];
 
@@ -48,9 +54,8 @@ if ($inputRaw !== '' && $inputRaw !== false) {
     $trimmed = trim($inputRaw);
     if ($trimmed !== '') {
         $decoded = json_decode($trimmed, true);
-        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-            $data = $decoded;
-        }
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) ingest_json_error(400, 'Invalid JSON payload');
+        $data = $decoded;
     }
 }
 
@@ -58,7 +63,8 @@ if (empty($data) && !empty($_POST)) {
     $data = $_POST;
 }
 
-$deviceUid = isset($data['device_uid']) ? trim((string) $data['device_uid']) : '';
+if (isset($data['device_uid']) && !is_string($data['device_uid'])) ingest_json_error(422, 'device_uid must be text');
+$deviceUid = isset($data['device_uid']) ? trim($data['device_uid']) : '';
 if ($deviceUid === '') {
     if (isset($_GET['device_uid'])) {
         $deviceUid = trim((string) $_GET['device_uid']);
@@ -116,11 +122,8 @@ function ingest_pick(array $data, array $keys)
 $errors = [];
 $values = [];
 $ranges = [
-    'temperature_c' => [['temperature_c', 'temperature', 'temp'], -60, 85, 2],
+    'temperature_c' => [['temperature_c', 'temperature', 'temp'], -40, 80, 2],
     'humidity_pct'  => [['humidity_pct', 'humidity'], 0, 100, 2],
-    'pressure_hpa'  => [['pressure_hpa', 'pressure'], 300, 1200, 2],
-    'lux'           => [['lux'], 0, 200000, 2],
-    'battery_pct'   => [['battery_pct', 'battery'], 0, 100, 0],
     'signal_dbm'    => [['signal_dbm', 'signal'], -120, 0, 0],
 ];
 
@@ -137,7 +140,7 @@ foreach ($ranges as $field => $rule) {
         continue;
     }
     $num = (float) $raw;
-    if ($num < $min || $num > $max) {
+    if (!is_finite($num) || $num < $min || $num > $max) {
         $errors[$field] = 'Out of range (' . $min . ' to ' . $max . ')';
         $values[$field] = null;
         continue;
@@ -162,9 +165,6 @@ $rainDetected = $rainDetected === null ? null : (int) $rainDetected;
 
 $temperatureC = $values['temperature_c'];
 $humidityPct  = $values['humidity_pct'];
-$pressureHpa  = $values['pressure_hpa'];
-$lux          = $values['lux'];
-$batteryPct   = $values['battery_pct'];
 $signalDbm    = $values['signal_dbm'];
 
 $heatIndexC = compute_heat_index($temperatureC, $humidityPct);
@@ -175,11 +175,12 @@ if ($heatIndexC !== null) {
 $recordedAt = date('Y-m-d H:i:s');
 $pdo = db();
 if ($pdo === null) {
-    ingest_json_error(500, 'Database not available');
+    ingest_json_error(503, 'Database not available');
 }
 
 try {
-    $stmt = $pdo->prepare('INSERT INTO readings (device_id, recorded_at, temperature_c, humidity_pct, rain_raw, rain_detected, pressure_hpa, heat_index_c, lux, battery_pct, signal_dbm) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $pdo->beginTransaction();
+    $stmt = $pdo->prepare('INSERT INTO readings (device_id, recorded_at, temperature_c, humidity_pct, rain_raw, rain_detected, heat_index_c, signal_dbm) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     $stmt->execute([
         $deviceId,
         $recordedAt,
@@ -187,16 +188,13 @@ try {
         $humidityPct,
         $rainRaw,
         $rainDetected,
-        $pressureHpa,
         $heatIndexC,
-        $lux,
-        $batteryPct,
         $signalDbm,
     ]);
     $readingId = (int) $pdo->lastInsertId();
 
     $updateStmt = $pdo->prepare('UPDATE devices SET last_seen_at = ?, status = ? WHERE id = ?');
-    $updateStmt->execute([$recordedAt, 'online', $deviceId]);
+    $updateStmt->execute([$recordedAt, $device['status'] === 'maintenance' ? 'maintenance' : 'online', $deviceId]);
 
     $alertsTriggered = 0;
     $rules = db_all('SELECT id, device_id, metric, operator, threshold, severity, enabled FROM alert_rules WHERE enabled = 1 AND (device_id IS NULL OR device_id = ?) ORDER BY id', [$deviceId]);
@@ -208,17 +206,11 @@ try {
             case 'temperature_c':
                 $value = $temperatureC;
                 break;
+            case 'rain_detected':
+                $value = $rainDetected;
+                break;
             case 'humidity_pct':
                 $value = $humidityPct;
-                break;
-            case 'pressure_hpa':
-                $value = $pressureHpa;
-                break;
-            case 'lux':
-                $value = $lux;
-                break;
-            case 'battery_pct':
-                $value = $batteryPct;
                 break;
         }
 
@@ -265,9 +257,13 @@ try {
         }
     }
 
+    if (db_error() !== '') throw new RuntimeException('Alert query failed');
+    $pdo->commit();
     ingest_success($readingId, $alertsTriggered);
 } catch (PDOException $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
     ingest_json_error(500, 'Database error');
 } catch (Exception $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
     ingest_json_error(500, 'Server error');
 }

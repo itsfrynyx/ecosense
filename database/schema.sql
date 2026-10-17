@@ -89,7 +89,7 @@ CREATE TABLE `readings` (
 CREATE TABLE `alert_rules` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `device_id` INT UNSIGNED DEFAULT NULL COMMENT 'NULL = applies to every device',
-  `metric` VARCHAR(32) NOT NULL COMMENT 'temperature_c | humidity_pct | pressure_hpa | lux | battery_pct',
+  `metric` VARCHAR(32) NOT NULL COMMENT 'temperature_c | humidity_pct | rain_detected',
   `operator` VARCHAR(4) NOT NULL DEFAULT '>' COMMENT '> | < | >= | <=',
   `threshold` DECIMAL(9,2) NOT NULL,
   `severity` VARCHAR(20) NOT NULL DEFAULT 'warning' COMMENT 'warning | critical',
@@ -153,22 +153,22 @@ INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `created_at`) VAL
   ('Read-only Viewer',   'viewer@ecosense.local',  '$2y$10$maP/Lw36d23FejVUJNGfwemcVT6YC6WGQ2xI3/gwh0JQiEG.eAHPK', 'viewer',   DATE_SUB(NOW(), INTERVAL 12 DAY));
 
 INSERT INTO `devices` (`device_uid`, `name`, `location`, `api_key`, `firmware`, `status`, `last_seen_at`, `created_at`) VALUES
-  ('ECO-TH-001', 'Lab Node 01',       'Engineering Lab — East Window',  'a7f3c19e5b2d4086ac1f7e93b04d62158ea3c7f9051b2d8e46a0c1f7b93d25e1a', 'ecosense-node/1.0.2', 'online',       DATE_SUB(NOW(), INTERVAL 2 SECOND), DATE_SUB(NOW(), INTERVAL 50 DAY)),
-  ('ECO-TH-002', 'Lab Node 02',       'Engineering Lab — Doorway',     '3b90d5ea71c64f28b5a0d9e47c182f6b3d40e97a5c2618fbd74e0a95c3d17b62', 'ecosense-node/1.0.2', 'online',       DATE_SUB(NOW(), INTERVAL 4 SECOND), DATE_SUB(NOW(), INTERVAL 47 DAY)),
-  ('ECO-TH-003', 'Rooftop Node 01',   'Main Building Rooftop',          'c41a8e07b93d25f16a8c40be7351d92f60a37e4b9d1582cf60e3a74b95d082f3', 'ecosense-node/1.1.0', 'online',       DATE_SUB(NOW(), INTERVAL 2 SECOND), DATE_SUB(NOW(), INTERVAL 38 DAY)),
-  ('ECO-TH-004', 'Greenhouse Node 01','Campus Greenhouse — Bay A',      'd72b6f14e08a39c5f1b47d0a9268e3c5b041f7a6c8e20d95b37a41f68e05c2d9', 'ecosense-node/1.0.2', 'maintenance', DATE_SUB(NOW(), INTERVAL 3 HOUR),  DATE_SUB(NOW(), INTERVAL 21 DAY));
+  ('ECO-TH-001', 'Lab Node 01',       'Engineering Lab — East Window',  SHA2(UUID(), 256), 'ecosense-node/1.0.2', 'online',       DATE_SUB(NOW(), INTERVAL 2 SECOND), DATE_SUB(NOW(), INTERVAL 50 DAY)),
+  ('ECO-TH-002', 'Lab Node 02',       'Engineering Lab — Doorway',     SHA2(UUID(), 256), 'ecosense-node/1.0.2', 'online',       DATE_SUB(NOW(), INTERVAL 4 SECOND), DATE_SUB(NOW(), INTERVAL 47 DAY)),
+  ('ECO-TH-003', 'Rooftop Node 01',   'Main Building Rooftop',          SHA2(UUID(), 256), 'ecosense-node/1.1.0', 'online',       DATE_SUB(NOW(), INTERVAL 2 SECOND), DATE_SUB(NOW(), INTERVAL 38 DAY)),
+  ('ECO-TH-004', 'Greenhouse Node 01','Campus Greenhouse — Bay A',      SHA2(UUID(), 256), 'ecosense-node/1.0.2', 'maintenance', DATE_SUB(NOW(), INTERVAL 3 HOUR),  DATE_SUB(NOW(), INTERVAL 21 DAY));
 
 INSERT INTO `alert_rules` (`device_id`, `metric`, `operator`, `threshold`, `severity`, `enabled`, `created_at`) VALUES
   (NULL, 'temperature_c', '>',  32.00, 'warning',  1, DATE_SUB(NOW(), INTERVAL 45 DAY)),
   (NULL, 'temperature_c', '>',  38.00, 'critical', 1, DATE_SUB(NOW(), INTERVAL 45 DAY)),
   (3,    'humidity_pct',  '>',  82.00, 'warning',  1, DATE_SUB(NOW(), INTERVAL 30 DAY)),
-  (NULL, 'pressure_hpa',  '<', 990.00, 'critical', 1, DATE_SUB(NOW(), INTERVAL 30 DAY));
+  (NULL, 'rain_detected', '>=', 1.00, 'warning', 1, DATE_SUB(NOW(), INTERVAL 30 DAY));
 
 INSERT INTO `settings` (`key`, `value`) VALUES
   ('unit', 'c'),
   ('site_name', 'Main Campus'),
   ('retention_days', '30'),
-  ('telemetry_interval_s', '2'),
+  ('telemetry_interval_s', '5'),
   ('dashboard_poll_ms', '3000'),
   ('device_online_window_s', '60'),
   ('temp_warn_high', '32.00'),
@@ -202,18 +202,16 @@ CROSS JOIN `tmp_digit` c
 WHERE (a.d + b.d * 10 + c.d * 100) < 480;
 
 INSERT INTO `readings`
-  (`device_id`, `recorded_at`, `temperature_c`, `humidity_pct`, `pressure_hpa`,
-   `heat_index_c`, `lux`, `battery_pct`, `signal_dbm`)
+  (`device_id`, `recorded_at`, `temperature_c`, `humidity_pct`, `rain_detected`,
+   `heat_index_c`, `signal_dbm`)
 SELECT
   m.device_id,
   m.ts,
   m.temp_c,
   m.rh,
-  m.pres,
+  IF(MINUTE(m.ts) < 15, 1, 0),
   -- simplified Steadman heat index, close enough for demo data
   ROUND(m.temp_c + 0.055 * GREATEST(0, m.rh - 45) * (m.temp_c - 21) / 5, 2),
-  m.lux,
-  m.bat,
   m.rssi
 FROM (
   SELECT
@@ -265,17 +263,15 @@ FROM (
 -- Three sub-cadence samples so the newest reading is only seconds old and the
 -- fleet reads as online the moment the schema is imported.
 INSERT INTO `readings`
-  (`device_id`, `recorded_at`, `temperature_c`, `humidity_pct`, `pressure_hpa`,
-   `heat_index_c`, `lux`, `battery_pct`, `signal_dbm`)
+  (`device_id`, `recorded_at`, `temperature_c`, `humidity_pct`, `rain_detected`,
+   `heat_index_c`, `signal_dbm`)
 SELECT
   f.device_id,
   f.ts,
   f.temp_c,
   f.rh,
-  f.pres,
+  IF(MINUTE(f.ts) < 15, 1, 0),
   ROUND(f.temp_c + 0.055 * GREATEST(0, f.rh - 45) * (f.temp_c - 21) / 5, 2),
-  f.lux,
-  f.bat,
   f.rssi
 FROM (
   SELECT
@@ -316,7 +312,7 @@ INSERT INTO `alerts` (`rule_id`, `device_id`, `metric`, `value`, `severity`, `me
   (3, 3, 'humidity_pct',  84.10, 'warning',  'Rooftop Node 01 humidity 84.10 % above 82.00 %',              DATE_SUB(NOW(), INTERVAL 7 HOUR),  NULL),
   (1, 3, 'temperature_c', 34.08, 'warning',  'Rooftop Node 01 temperature 34.08 °C above 32.00 °C',        DATE_SUB(NOW(), INTERVAL 5 HOUR),  NULL),
   (2, 4, 'temperature_c', 38.64, 'critical', 'Greenhouse Node 01 temperature 38.64 °C above 38.00 °C',      DATE_SUB(NOW(), INTERVAL 3 HOUR),  NULL),
-  (4, 2, 'pressure_hpa',  988.40,'critical', 'Lab Node 02 pressure 988.40 hPa below 990.00 hPa',          DATE_SUB(NOW(), INTERVAL 52 MINUTE),NULL);
+  (4, 2, 'rain_detected', 1.00,'warning', 'Lab Node 02 rain sensor plate is wet',          DATE_SUB(NOW(), INTERVAL 52 MINUTE),NULL);
 
 -- Retention housekeeping, if you schedule it (Windows Task Scheduler / cron):
 --   DELETE FROM readings WHERE recorded_at < DATE_SUB(NOW(), INTERVAL 30 DAY);

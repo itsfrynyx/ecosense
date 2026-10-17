@@ -125,7 +125,7 @@ function time_ago($datetime, $now = null)
     if (!$ts) {
         return '—';
     }
-    $diff = time() - ($now === null ? time() : (int) $now);
+    $diff = ($now === null ? time() : (int) $now) - $ts;
     $future = $diff < 0;
     $diff   = abs($diff);
 
@@ -174,6 +174,8 @@ function status_badge($status)
 
 function preferred_unit()
 {
+    $cookie = $_COOKIE['eco_unit'] ?? null;
+    if (is_string($cookie) && in_array($cookie, ['c', 'f'], true)) return $cookie;
     $unit = strtolower((string) setting('unit', defined('UNIT_DEFAULT') ? UNIT_DEFAULT : 'c'));
     return $unit === 'f' ? 'f' : 'c';
 }
@@ -211,7 +213,7 @@ function unit_temp($celsius, $unit = null, $decimals = 1)
 function compute_heat_index($tempC, $rhPct)
 {
     if (!is_numeric($tempC) || !is_numeric($rhPct)) {
-        return is_numeric($tempC) ? round((float) $tempC, 2) : null;
+        return null;
     }
     $t  = (float) $tempC;
     $rh = (float) $rhPct;
@@ -234,7 +236,6 @@ function compute_heat_index($tempC, $rhPct)
             + 0.00122874 * $f * $f * $rh
             + 0.00085282 * $f * $rh * $rh
             - 0.00000199 * $f * $f * $rh * $rh;
-        $hi += 0.5555 * ($hi - $f);
     } elseif ($simple < 80) {
         $hi = $simple;
     } else {
@@ -267,10 +268,10 @@ function latest_readings($deviceIds = null)
         return [];
     }
 
-    $sql = 'SELECT d.id AS device_id, d.device_uid, d.name AS device_name, d.status, d.location,
+    $sql = 'SELECT d.id AS device_id, d.device_uid, d.name, d.name AS device_name, d.status, d.location,
                    d.last_seen_at, d.firmware,
-                   r.recorded_at, r.temperature_c, r.humidity_pct, r.rain_raw, r.pressure_hpa,
-                   r.heat_index_c, r.lux, r.battery_pct, r.signal_dbm
+                   r.recorded_at, r.temperature_c, r.humidity_pct, r.rain_raw, r.rain_detected,
+                   r.heat_index_c, r.signal_dbm
             FROM devices d
             LEFT JOIN readings r ON r.id = (
                 SELECT id FROM readings WHERE device_id = d.id ORDER BY recorded_at DESC, id DESC LIMIT 1
@@ -301,7 +302,7 @@ function reading_series($deviceId, $hours = 24, $limit = 500)
     }
     $hours = max(1, (int) $hours);
     $rows  = db_all(
-        'SELECT recorded_at, temperature_c, humidity_pct, pressure_hpa
+        'SELECT recorded_at, temperature_c, humidity_pct, rain_detected
          FROM readings
          WHERE device_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ' . $hours . ' HOUR)
          ORDER BY recorded_at ASC
@@ -321,10 +322,8 @@ function reading_json($row)
         'label'      => $ts === false ? '' : date('M j H:i', $ts),
         'temperature' => isset($row['temperature_c']) ? (float) $row['temperature_c'] : null,
         'humidity'   => isset($row['humidity_pct']) ? (float) $row['humidity_pct'] : null,
-        'pressure'   => isset($row['pressure_hpa']) ? (float) $row['pressure_hpa'] : null,
+        'rain'   => isset($row['rain_detected']) ? (float) $row['rain_detected'] : null,
         'heat'       => isset($row['heat_index_c']) ? (float) $row['heat_index_c'] : null,
-        'lux'        => isset($row['lux']) ? (float) $row['lux'] : null,
-        'battery'    => isset($row['battery_pct']) ? (int) $row['battery_pct'] : null,
         'signal'     => isset($row['signal_dbm']) ? (int) $row['signal_dbm'] : null,
     ];
 }

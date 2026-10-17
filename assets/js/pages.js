@@ -39,6 +39,24 @@
   });
   
   // Rotate
+  qsa('[data-edit-rule]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      try {
+        const rule = JSON.parse(btn.getAttribute('data-edit-rule'));
+        const fields = {rule_id: 'id', device_id: 'device_id', metric: 'metric', operator: 'operator', threshold: 'threshold', severity: 'severity'};
+        Object.entries(fields).forEach(([field, key]) => {
+          document.querySelector('#modalRuleEdit [name="' + field + '"]').value = rule[key] ?? 0;
+        });
+        document.querySelector('#modalRuleEdit [name="enabled"]').checked = Number(rule.enabled) === 1;
+        const allDevices = document.querySelector('#modalRuleEdit [name="device_all"]');
+        if (allDevices) allDevices.checked = rule.device_id == null;
+        document.getElementById('modalRuleEdit').hidden = false;
+      } catch (error) {
+        if (window.EcoToast) window.EcoToast('Could not open the alert rule', 'error');
+      }
+    });
+  });
+
   qsa('[data-rotate-device]').forEach(btn => {
     btn.addEventListener('click', () => {
       if(confirm('Rotate API key? This will invalidate the old key.')) {
@@ -55,7 +73,7 @@
         const d = JSON.parse(btn.getAttribute('data-copy-snippet'));
         const base = window.ECOSENSE_BASE || '/';
         const url = base + 'api/ingest.php';
-        const curl = `curl -X POST "${url}" -H "X-Device-Key: ${d.api_key}" -H "Content-Type: application/json" -d '{"device_uid":"${d.device_uid}","temperature_c":28.4,"humidity_pct":65,"pressure_hpa":1010,"lux":12000}'`;
+        const curl = `curl -X POST "${url}" -H "X-Device-Key: ${d.api_key}" -H "Content-Type: application/json" -d '{"device_uid":"${d.device_uid}","temperature_c":28.4,"humidity_pct":65,"rain_detected":0}'`;
         document.getElementById('snippetUrl').textContent = url;
         document.getElementById('snippetApiKey').value = d.api_key;
         document.getElementById('snippetCurl').textContent = curl;

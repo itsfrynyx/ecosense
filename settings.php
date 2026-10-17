@@ -47,12 +47,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
     } elseif ($action === 'preferences') {
         $unit = strtolower(trim((string)($_POST['unit'] ?? 'c')));
         if ($unit !== 'f') $unit = 'c';
-        setcookie('eco_unit', $unit, time() + 31536000, '/', '', isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off', true);
+        setcookie('eco_unit', $unit, [
+            'expires' => time() + 31536000,
+            'path' => auth_url_path(),
+            'secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+            'httponly' => false,
+            'samesite' => 'Lax',
+        ]);
         db_query('INSERT INTO settings (`key`, `value`) VALUES ("unit", ?) ON DUPLICATE KEY UPDATE `value` = ?', [$unit, $unit]);
         flash('success', 'Preferences saved');
         redirect('settings.php');
     } elseif ($action === 'thresholds') {
-        $keys = ['temp_warn_high','temp_crit_high','temp_warn_low','humidity_warn_high','humidity_warn_low','pressure_warn_low','battery_warn_pct'];
+        require_role('admin');
+        $keys = ['temp_warn_high','temp_crit_high','temp_warn_low','humidity_warn_high','humidity_warn_low'];
         foreach ($keys as $k) {
             if (isset($_POST[$k])) {
                 $v = is_numeric($_POST[$k]) ? (string)$_POST[$k] : '0';
@@ -62,6 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
         flash('success', 'Thresholds updated');
         redirect('settings.php');
     } elseif ($action === 'retention') {
+        require_role('admin');
         $days = (int)($_POST['retention_days'] ?? 30);
         if ($days < 0) $days = 0;
         db_query('INSERT INTO settings (`key`, `value`) VALUES ("retention_days", ?) ON DUPLICATE KEY UPDATE `value` = ?', [(string)$days, (string)$days]);
@@ -90,8 +98,6 @@ $tempCritHigh = (float)setting('temp_crit_high', TEMP_CRIT_HIGH);
 $tempWarnLow = (float)setting('temp_warn_low', TEMP_WARN_LOW);
 $humWarnHigh = (float)setting('humidity_warn_high', defined('HUMIDITY_WARN')?HUMIDITY_WARN:80);
 $humWarnLow = (float)setting('humidity_warn_low', defined('HUMIDITY_LOW')?HUMIDITY_LOW:20);
-$presWarnLow = (float)setting('pressure_warn_low', defined('PRESSURE_LOW')?PRESSURE_LOW:990);
-$battWarn = (int)setting('battery_warn_pct', defined('BATTERY_WARN')?BATTERY_WARN:25);
 $retDays = (int)setting('retention_days', defined('RETENTION_DAYS')?RETENTION_DAYS:30);
 
 $ecoPageHasH1 = true;
@@ -152,9 +158,7 @@ require __DIR__ . '/includes/header.php';
         </div>
         <div class="field__row">
           <div class="field"><label for="thr_humidity_warn_low">Humidity warn low (%)</label><input type="number" step="0.1" name="humidity_warn_low" id="thr_humidity_warn_low" value="<?= e((string)$humWarnLow) ?>"></div>
-          <div class="field"><label for="thr_pressure_warn_low">Pressure warn low (hPa)</label><input type="number" step="0.1" name="pressure_warn_low" id="thr_pressure_warn_low" value="<?= e((string)$presWarnLow) ?>"></div>
         </div>
-        <div class="field"><label for="thr_battery_warn_pct">Battery warn (%)</label><input type="number" name="battery_warn_pct" id="thr_battery_warn_pct" value="<?= e((string)$battWarn) ?>"></div>
         <div class="card__foot"><button class="btn btn--primary" type="submit">Save thresholds</button></div>
       </form>
     </div>

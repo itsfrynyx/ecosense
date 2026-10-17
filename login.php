@@ -60,9 +60,9 @@ if (is_post()) {
 }
 
 $ecoFeatures = [
-    ['icon' => 'activity',       'title' => '2 second telemetry',      'copy' => 'DHT22, BMP280 and BH1750 samples land in MySQL within two seconds of the node waking.'],
+    ['icon' => 'activity',       'title' => '5 second telemetry',      'copy' => 'DHT22 temperature and humidity plus digital rain status are sent to MySQL every five seconds.'],
     ['icon' => 'shield',         'title' => 'Role-based access',      'copy' => 'Admin, operator and viewer roles keep fleet edits behind an admin check.'],
-    ['icon' => 'alert-triangle', 'title' => 'Threshold alerting',     'copy' => 'Warning and critical rules watch temperature, humidity, pressure and battery.'],
+    ['icon' => 'alert-triangle', 'title' => 'Threshold alerting',     'copy' => 'Warning and critical rules watch temperature, humidity and rain detection.'],
     ['icon' => 'download',       'title' => 'History and CSV export', 'copy' => 'Thirty days of readings, aggregatable by minute, hour or day.'],
 ];
 ?>
@@ -103,7 +103,7 @@ $ecoFeatures = [
       </p>
       <h1 class="auth-brand__title">Sign in to the<br><em>instrument panel</em>.</h1>
       <p class="auth-brand__sub">
-        Four ESP32 nodes stream temperature, humidity, pressure and lux over Wi-Fi into a
+        ESP8266 nodes stream temperature, humidity and rain detection over Wi-Fi into a
         PHP ingest API. This console turns that stream into live traces, threshold alerts
         and fleet health.
       </p>
@@ -141,7 +141,7 @@ $ecoFeatures = [
 
     <p class="auth-foot">
       <span class="auth-foot__status"><span class="live-dot" aria-hidden="true"></span>All systems nominal</span>
-      <span>ESP32 &rarr; PHP &rarr; MySQL</span>
+      <span>ESP8266 &rarr; PHP &rarr; MySQL</span>
       <span class="mono">v<?= e(APP_VERSION) ?></span>
     </p>
   </section>

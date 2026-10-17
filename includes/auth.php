@@ -261,6 +261,9 @@ function require_login($returnTo = null)
     if (is_logged_in()) {
         return;
     }
+    if (defined('ECOSENSE_API') && ECOSENSE_API) {
+        json_response(['ok' => false, 'error' => 'Sign in required'], 401);
+    }
     if ($returnTo === null) {
         $returnTo = urldecode((string) ($_SERVER['REQUEST_URI'] ?? ''));
     }
@@ -281,6 +284,9 @@ function require_role($roles, $returnTo = null)
     require_login($returnTo);
     if (user_has_role($roles)) {
         return;
+    }
+    if (defined('ECOSENSE_API') && ECOSENSE_API) {
+        json_response(['ok' => false, 'error' => 'Permission denied'], 403);
     }
     flash('error', 'That action needs an administrator role.');
     redirect('dashboard.php');

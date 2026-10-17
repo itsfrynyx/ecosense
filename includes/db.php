@@ -30,6 +30,9 @@ function db()
             PDO::ATTR_EMULATE_PREPARES   => false,
             PDO::ATTR_STRINGIFY_FETCHES  => false,
         ]);
+        // Store DATETIME values in the same local timezone used by PHP.
+        $offset = (new DateTimeImmutable())->format('P');
+        $pdo->exec('SET time_zone = ' . $pdo->quote($offset));
     } catch (PDOException $e) {
         $pdo = null;
         db_set_error($e->getMessage());

@@ -125,7 +125,7 @@ include __DIR__ . '/includes/head.php';
         <h1 class="hero__title" id="heroTitle">Feel the weather <em>before</em> it arrives.</h1>
 
         <p class="hero__sub lede">
-          Four ESP32 sensor nodes sample temperature, humidity, pressure and lux every two seconds,
+          ESP8266 nodes read DHT22 temperature and humidity plus digital rain detection every five seconds,
           push them over Wi&#8209;Fi to a PHP ingest API, and land in MySQL &mdash; where the dashboard
           renders them live, with alerting and history you can actually export.
         </p>
@@ -140,7 +140,7 @@ include __DIR__ . '/includes/head.php';
         </div>
 
         <ul class="hero__meta">
-          <li><?= icon('chip', 'ico--sm') ?> ESP32-WROOM-32 &times;4</li>
+          <li><?= icon('chip', 'ico--sm') ?> ESP8266 NodeMCU</li>
           <li><?= icon('clock', 'ico--sm') ?> 2 s publish interval</li>
           <li><?= icon('database', 'ico--sm') ?> PDO / MySQL, prepared statements</li>
           <li><?= icon('shield', 'ico--sm') ?> Per-device 64-char API keys</li>
@@ -232,10 +232,7 @@ include __DIR__ . '/includes/head.php';
           <div class="tele">
             <div class="tele__grid">
               <span class="tele__ico"><?= icon('gauge') ?></span>
-              <span class="tele__label">Pressure</span>
-              <span class="tele__val" data-tele="pres" data-seed="1008.4">1008.4</span>
-              <span class="tele__unit">hPa</span>
-              <span class="tele__delta" data-tele-delta="pres" data-dir="flat">+0.2 vs last</span>
+              <span class="tele__label">Rain sensor</span><span class="tele__val">Wet / dry</span><span class="tele__unit">DO</span><span class="tele__delta">Digital detection</span>
             </div>
           </div>
         </div>
@@ -317,7 +314,7 @@ include __DIR__ . '/includes/head.php';
       <div class="section__head reveal" data-reveal="1">
         <p class="eyebrow">Pipeline</p>
         <h2 class="h2" id="howTitle">Four stages, one loop.</h2>
-        <p>From the air on a rooftop to a chart on a laptop in under two seconds &mdash; every stage is a
+        <p>From the air on a rooftop to a chart on a laptop in a few seconds &mdash; every stage is a
           separate, inspectable piece of hardware or code.</p>
       </div>
 
@@ -326,15 +323,14 @@ include __DIR__ . '/includes/head.php';
           <span class="step__node" aria-hidden="true">01</span>
           <span class="step__ico" aria-hidden="true"><?= icon('thermometer') ?></span>
           <h3>Sense</h3>
-          <p>The node samples temperature, humidity, barometric pressure and ambient light, then applies a
-            moving average to reject spikes.</p>
+          <p>The DHT22 reads air temperature and relative humidity. The digital rain module reports whether its plate is wet or dry.</p>
           <span class="step__spec">DHT22 &middot; &plusmn;0.5 &deg;C</span>
         </li>
         <li class="step reveal" data-reveal="2">
           <span class="step__node" aria-hidden="true">02</span>
           <span class="step__ico" aria-hidden="true"><?= icon('wifi') ?></span>
           <h3>Transmit</h3>
-          <p>The ESP32 wakes from deep sleep every two seconds and POSTs a compact JSON packet over the
+          <p>The ESP8266 reads DHT22 and digital rain every five seconds and POSTs a compact JSON packet over the
             local Wi&#8209;Fi network.</p>
           <span class="step__spec">HTTP POST &middot; 2 s</span>
         </li>
@@ -384,7 +380,7 @@ include __DIR__ . '/includes/head.php';
               <rect class="arch__box" x="24" y="30" width="240" height="86" rx="10"></rect>
               <g transform="translate(44, 60)"><?= icon('thermometer', 'arch__ico') ?></g>
               <text class="arch__ttl" x="76" y="70">SENSOR NODE</text>
-              <text class="arch__sub" x="76" y="90">DHT22 &middot; BMP280 &middot; BH1750</text>
+              <text class="arch__sub" x="76" y="90">DHT22 &middot; Rain sensor</text>
             </g>
 
             <g>
@@ -397,8 +393,8 @@ include __DIR__ . '/includes/head.php';
             <g>
               <rect class="arch__box arch__box--live" x="596" y="30" width="240" height="86" rx="10"></rect>
               <g transform="translate(616, 60)"><?= icon('chip', 'arch__ico') ?></g>
-              <text class="arch__ttl" x="648" y="70">ESP32-WROOM-32</text>
-              <text class="arch__sub" x="648" y="90">JSON payload &middot; deep sleep</text>
+              <text class="arch__ttl" x="648" y="70">ESP8266 NodeMCU</text>
+              <text class="arch__sub" x="648" y="90">DHT22 + rain &middot; JSON</text>
             </g>
 
             <g>
@@ -479,7 +475,7 @@ include __DIR__ . '/includes/head.php';
         <article class="feat feat--wide reveal" data-reveal="1">
           <span class="feat__ico"><?= icon('activity', 'ico--lg') ?></span>
           <h3>Real-time streaming</h3>
-          <p>Readings arrive every two seconds and are pushed into the live charts on a three-second poll.
+          <p>Readings arrive every five seconds and are pushed into the live charts on a three-second poll.
             No page reloads, no lost samples, and a clear "connection lost" state when the API stops answering.</p>
           <span class="feat__spec">poll 3000 ms &middot; draw-in 240 ms</span>
         </article>
@@ -529,13 +525,13 @@ include __DIR__ . '/includes/head.php';
       <div class="section__head reveal" data-reveal="1">
         <p class="eyebrow">Hardware</p>
         <h2 class="h2" id="hwTitle">Inside a node.</h2>
-        <p>One ESP32 board, five sensors and a protected cell. Everything is off-the-shelf, so a lab can
+        <p>One ESP8266 board, a DHT22 and a digital rain sensor. Everything is off-the-shelf, so a lab can
           rebuild a node for a few thousand pesos.</p>
       </div>
 
       <div class="hw">
         <div class="reveal" data-reveal="1">
-          <div class="exploded" role="img" aria-label="Exploded view of a sensor node: antenna, sealed lid, main PCB, sensor daughterboard and battery cell">
+          <div class="exploded" role="img" aria-label="Exploded view of a sensor node: antenna, sealed lid, main PCB, DHT22 and digital rain module">
             <div class="exploded__stage">
               <div class="plate plate--antenna">
                 <div class="plate__dots"><i></i><i></i><i></i><i></i><i></i><i></i></div>
@@ -549,13 +545,12 @@ include __DIR__ . '/includes/head.php';
               <div class="plate plate--sensor">
                 <div class="plate__dots"><i></i><i></i><i></i></div>
               </div>
-              <div class="plate plate--battery">
-                <div class="plate__dots"><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="plate plate--battery"><span>USB power</span></div>
               </div>
               <span class="core" aria-hidden="true"></span>
             </div>
             <span class="exploded__tag exploded__tag--a">2.4 GHz antenna</span>
-            <span class="exploded__tag exploded__tag--b">ESP32 + sensor stack</span>
+            <span class="exploded__tag exploded__tag--b">ESP8266 + DHT22 + rain</span>
             <span class="exploded__tag exploded__tag--c">18650 cell</span>
           </div>
         </div>
@@ -572,40 +567,17 @@ include __DIR__ . '/includes/head.php';
             </thead>
             <tbody>
               <tr>
-                <td data-label="Component">ESP32-WROOM-32</td>
-                <td data-label="Spec">Dual-core 240 MHz</td>
-                <td data-label="Role">Host MCU &middot; Wi-Fi client &middot; deep sleep</td>
+                <td data-label="Component">ESP8266 NodeMCU</td>
+                <td data-label="Spec">Wi-Fi microcontroller</td>
+                <td data-label="Role">Host MCU &middot; Wi-Fi client &middot; USB power</td>
               </tr>
               <tr>
                 <td data-label="Component">DHT22</td>
                 <td data-label="Spec">&plusmn;0.5 &deg;C &middot; &plusmn;2 % RH</td>
                 <td data-label="Role">Air temperature and relative humidity</td>
               </tr>
-              <tr>
-                <td data-label="Component">BMP280</td>
-                <td data-label="Spec">&plusmn;1 hPa &middot; 300&ndash;1100 hPa</td>
-                <td data-label="Role">Barometric pressure and altitude trend</td>
-              </tr>
-              <tr>
-                <td data-label="Component">BH1750</td>
-                <td data-label="Spec">1&ndash;65535 lx</td>
-                <td data-label="Role">Ambient illuminance, day/night tracking</td>
-              </tr>
-              <tr>
-                <td data-label="Component">DS18B20 probe</td>
-                <td data-label="Spec">&plusmn;0.5 &deg;C &middot; &minus;55&hellip;125 &deg;C</td>
-                <td data-label="Role">Sealed soil / enclosure temperature</td>
-              </tr>
-              <tr>
-                <td data-label="Component">18650 + TP4056</td>
-                <td data-label="Spec">3.7 V 2600 mAh</td>
-                <td data-label="Role">Power bank with USB-C charge and protection</td>
-              </tr>
-              <tr>
-                <td data-label="Component">Ceramic antenna</td>
-                <td data-label="Spec">2.4 GHz &middot; +2 dBi</td>
-                <td data-label="Role">Range extension for indoor corridors</td>
-              </tr>
+              <tr><td data-label="Component">Rain sensor module</td><td data-label="Spec">Digital DO output</td><td data-label="Role">Wet / dry detection on D5; not rainfall volume</td></tr>
+
               <tr>
                 <td data-label="Component">IP65 enclosure</td>
                 <td data-label="Spec">ABS &middot; silicone gasket</td>
@@ -635,12 +607,10 @@ include __DIR__ . '/includes/head.php';
             <h3>Device</h3>
           </div>
           <div class="stackgrp__list">
-            <span class="chip chip--accent">ESP32-WROOM-32</span>
+            <span class="chip chip--accent">ESP8266 NodeMCU</span>
             <span class="chip">Arduino Core</span>
-            <span class="chip">DHT22</span>
-            <span class="chip">BMP280</span>
-            <span class="chip">BH1750</span>
-            <span class="chip">DS18B20</span>
+            <span class="chip">DHT22</span><span class="chip">Digital rain sensor</span>
+
           </div>
         </article>
 
@@ -654,7 +624,7 @@ include __DIR__ . '/includes/head.php';
             <span class="chip">HTTP POST</span>
             <span class="chip">JSON</span>
             <span class="chip">X-Device-Key</span>
-            <span class="chip chip--lo">deep sleep 2 s</span>
+            <span class="chip chip--lo">sampling every 5 s</span>
           </div>
         </article>
 
@@ -700,14 +670,14 @@ include __DIR__ . '/includes/head.php';
       <div class="specpanel reveal" data-reveal="1">
         <div class="specpanel__grid">
           <div class="spec">
-            <p class="spec__num">2<small>s</small></p>
+            <p class="spec__num">5<small>s</small></p>
             <p class="spec__label">Telemetry cadence</p>
-            <p class="spec__note">ESP32 deep-sleep wake &rarr; sample &rarr; POST</p>
+            <p class="spec__note">ESP8266 sample &rarr; POST every 5 seconds</p>
           </div>
           <div class="spec">
-            <p class="spec__num">&lt;120<small>ms</small></p>
-            <p class="spec__label">Ingest to first pixel</p>
-            <p class="spec__note">PDO insert plus chart point push</p>
+            <p class="spec__num">3<small>s</small></p>
+            <p class="spec__label">Dashboard poll interval</p>
+            <p class="spec__note">Refreshes the latest readings over HTTP</p>
           </div>
           <div class="spec">
             <p class="spec__num">30<small>days</small></p>
@@ -717,11 +687,8 @@ include __DIR__ . '/includes/head.php';
         </div>
 
         <div class="specpanel__foot">
-          <p><strong>Methodology.</strong> Cadence is the firmware
-            <code>DEEP_SLEEP</code> timer; latency is the median of 100 local ingest requests measured from
-            POST start to first chart paint; retention is enforced by a scheduled prune job rather than a
-            database event, so the same numbers can be reproduced on a fresh import.</p>
-          <span class="specpanel__tag">n = 4 nodes &middot; 48 h window</span>
+          <p>The firmware sends temperature, humidity and wet/dry detection every five seconds. The dashboard polls separately; timing depends on Wi-Fi and server availability.</p>
+          <span class="specpanel__tag">DHT22 &middot; digital rain sensor</span>
         </div>
       </div>
     </div>
@@ -747,8 +714,7 @@ include __DIR__ . '/includes/head.php';
           </h3>
           <div class="faq__panel" id="faqPanel1" data-faq-panel>
             <div>
-              <p class="faq__a">Each ESP32 wakes from deep sleep every two seconds, reads the DHT22, BMP280
-                and BH1750 over I<sup>2</sup>C, applies a five-sample moving average, then POSTs a small JSON
+              <p class="faq__a">Each ESP8266 runs every five seconds, reads DHT22 temperature and humidity and the rain module digital output, then POSTs a small JSON
                 object to <code>api/ingest.php</code> with its <code>device_uid</code> and
                 <code>X-Device-Key</code>. The endpoint validates, inserts one row, evaluates the alert rules and
                 answers with the new <code>reading_id</code>.</p>
@@ -805,7 +771,7 @@ include __DIR__ . '/includes/head.php';
           <div class="faq__panel" id="faqPanel4" data-faq-panel>
             <div>
               <p class="faq__a">Around PHP 1,400 per node at typical module prices: roughly a third of that is the
-                ESP32, with the sensor set, the 18650 cell, the TP4056 board and the IP65 case making up the rest.
+                ESP8266, DHT22, digital rain module, USB supply and enclosure.
                 There is no recurring fee &mdash; the stack is XAMPP on your own machine, and the dashboard needs
                 no external service or API key.</p>
             </div>
@@ -867,7 +833,7 @@ include __DIR__ . '/includes/head.php';
           <span><?= e(APP_NAME) ?></span>
         </a>
         <p class="foot__blurb">An IoT-based system for real-time weather detection and temperature
-          monitoring &mdash; ESP32 sensor nodes, a PHP/MySQL ingest API and a live dashboard, built as a
+          monitoring &mdash; ESP8266 sensor nodes, a PHP/MySQL ingest API and a live dashboard, built as a
           working engineering project.</p>
       </div>
 
@@ -906,7 +872,7 @@ include __DIR__ . '/includes/head.php';
 
     <div class="foot__bottom">
       <p>&copy; <?= e(date('Y')) ?> <?= e(APP_NAME) ?> &middot; <?= e(APP_SHORT) ?></p>
-      <p class="foot__built"><?= icon('chip', 'ico--xs') ?> Built with ESP32 &middot; PHP <?= e(PHP_MAJOR_VERSION) ?>.<?= e(PHP_MINOR_VERSION) ?> &middot; MySQL</p>
+      <p class="foot__built"><?= icon('chip', 'ico--xs') ?> Built with ESP8266 &middot; PHP <?= e(PHP_MAJOR_VERSION) ?>.<?= e(PHP_MINOR_VERSION) ?> &middot; MySQL</p>
       <p class="foot__status">
         <span class="live-dot<?= $ecoDbUp && $ecoFleetStatus === 'online' ? ' live-dot--good' : ' live-dot--warn' ?>" aria-hidden="true"></span>
         <?= $ecoDbUp && $ecoFleetStatus === 'online' ? 'All systems nominal' : 'Running on simulated telemetry' ?>

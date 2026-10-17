@@ -55,6 +55,16 @@
     return out;
   }
 
+  function traceSteps(ctx, pts) {
+    if (!pts.length) return;
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (var i = 1; i < pts.length; i++) {
+      if (pts[i].index !== pts[i - 1].index + 1) { ctx.moveTo(pts[i].x, pts[i].y); continue; }
+      ctx.lineTo(pts[i].x, pts[i - 1].y);
+      ctx.lineTo(pts[i].x, pts[i].y);
+    }
+  }
+
   function extent(series) {
     var lo = Infinity, hi = -Infinity;
     for (var s = 0; s < series.length; s++) {
@@ -234,6 +244,7 @@
 
     this.opts = {
       labels: labels,
+      tooltipLabels: opts.tooltipLabels !== undefined ? opts.tooltipLabels : this.opts.tooltipLabels,
       series: (incoming || []).map(function (s, i) {
         return {
           key: s.key || ('series' + i),
@@ -243,13 +254,18 @@
           decimals: s.decimals,
           values: numeric(s.values),
           fill: !!s.fill,
-          dashed: !!s.dashed
+          dashed: !!s.dashed,
+          stepped: !!s.stepped
         };
       }),
       yUnit: opts.yUnit !== undefined ? opts.yUnit : (this.opts.yUnit || ''),
-      yMin: opts.yMin,
-      yMax: opts.yMax,
-      decimals: opts.decimals,
+      yMin: opts.yMin !== undefined ? opts.yMin : this.opts.yMin,
+      yMax: opts.yMax !== undefined ? opts.yMax : this.opts.yMax,
+      decimals: opts.decimals !== undefined ? opts.decimals : this.opts.decimals,
+      endpointLabels: opts.endpointLabels !== undefined ? opts.endpointLabels : !!this.opts.endpointLabels,
+      xLabel: opts.xLabel !== undefined ? opts.xLabel : this.opts.xLabel,
+      yLabel: opts.yLabel !== undefined ? opts.yLabel : this.opts.yLabel,
+      time12Hour: opts.time12Hour !== undefined ? opts.time12Hour : !!this.opts.time12Hour,
       emptyText: opts.emptyText || 'No readings in this window'
     };
 
@@ -309,6 +325,30 @@
     ctx.textBaseline = 'middle';
 
     var padT = 14, padR = 12, padB = 22, padL = 46;
+    if (this.opts.xLabel) padB = 44;
+    if (this.opts.yLabel) padL = 68;
+    var formatTime = function (label) {
+      var text = String(label);
+      if (!this.opts.time12Hour) return text;
+      return text.replace(/(^|[ T])(\d{1,2}):(\d{2})(:\d{2})?(?=$|\s)/, function (match, prefix, hour, minute, seconds) {
+        var h = Number(hour);
+        if (h > 23) return match;
+        return prefix + (h % 12 || 12) + ':' + minute + (seconds || '') + (h >= 12 ? ' PM' : ' AM');
+      });
+    }.bind(this);
+    var endpoints = [];
+    if (this.opts.endpointLabels) {
+      series.forEach(function (ser) {
+        for (var i = Math.min(ser.values.length, labels.length) - 1; i >= 0; i--) {
+          if (!isNum(ser.values[i])) continue;
+          var valueText = fmt(ser.values[i], ser.decimals !== undefined ? ser.decimals : this.opts.decimals);
+          var text = ser.label + ': ' + valueText + (ser.unit ? ' ' + ser.unit : '');
+          endpoints.push({ series: ser, index: i, value: ser.values[i], text: text });
+          padR = Math.max(padR, ctx.measureText(text).width + 28);
+          break;
+        }
+      }, this);
+    }
     var plotW = Math.max(10, W - padL - padR);
     var plotH = Math.max(10, H - padT - padB);
 
@@ -360,8 +400,20 @@
       ctx.strokeStyle = 'rgba(148,163,184,0.045)';
       ctx.stroke();
       ctx.fillStyle = T.lo;
-      ctx.fillText(String(labels[t]), tx, padT + plotH + 12);
+      ctx.fillText(formatTime(labels[t]), tx, padT + plotH + 12);
     }
+
+    ctx.save();
+    ctx.fillStyle = T.lo;
+    ctx.textAlign = 'center';
+    if (this.opts.xLabel) ctx.fillText(this.opts.xLabel, padL + plotW / 2, H - 8);
+    if (this.opts.yLabel) {
+      ctx.translate(14, padT + plotH / 2);
+      ctx.rotate(-Math.PI / 2);
+      var axisUnit = series.length === 1 && series[0].unit ? ' (' + series[0].unit + ')' : '';
+      ctx.fillText(this.opts.yLabel + axisUnit, 0, 0);
+    }
+    ctx.restore();
 
     if (!series.length || !labels.length) {
       ctx.fillStyle = T.lo;
@@ -384,7 +436,7 @@
       for (var i = 0; i < ser.values.length && i < labels.length; i++) {
         var v = ser.values[i];
         if (v === null || v === undefined) { continue; }
-        pts.push({ x: X(i), y: Y(v) });
+        pts.push({ x: X(i), y: Y(v), index: i });
       }
       if (pts.length < 1) { return; }
       if (si === 0) { primary = { ser: ser, pts: pts }; }
@@ -395,7 +447,7 @@
         grad.addColorStop(0, alpha(ser.color, 0.24));
         grad.addColorStop(1, alpha(ser.color, 0));
         ctx.beginPath();
-        tracePath(ctx, pts);
+        if (ser.stepped) traceSteps(ctx, pts); else tracePath(ctx, pts);
         ctx.lineTo(pts[pts.length - 1].x, padT + plotH);
         ctx.lineTo(pts[0].x, padT + plotH);
         ctx.closePath();
@@ -404,7 +456,7 @@
       }
 
       ctx.beginPath();
-      tracePath(ctx, pts);
+      if (ser.stepped) traceSteps(ctx, pts); else tracePath(ctx, pts);
       ctx.strokeStyle = ser.color;
       ctx.lineWidth = 1.8;
       ctx.lineJoin = 'round';
@@ -453,9 +505,38 @@
 
     ctx.restore();
 
+    if (this.opts.endpointLabels && this.progress >= 1) {
+      endpoints.forEach(function (point) { point.y = Y(point.value); });
+      endpoints.sort(function (a, b) { return a.y - b.y; });
+      endpoints.forEach(function (point, index) {
+        point.labelY = Math.max(padT + 8, point.y);
+        if (index) point.labelY = Math.max(point.labelY, endpoints[index - 1].labelY + 22);
+      });
+      for (var e = endpoints.length - 1; e >= 0; e--) {
+        endpoints[e].labelY = Math.min(endpoints[e].labelY, padT + plotH - 8);
+        if (e < endpoints.length - 1) endpoints[e].labelY = Math.min(endpoints[e].labelY, endpoints[e + 1].labelY - 22);
+      }
+      ctx.save();
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      endpoints.forEach(function (point) {
+        var labelX = padL + plotW + 16;
+        ctx.beginPath();
+        ctx.moveTo(X(point.index) + 5, point.y);
+        ctx.lineTo(labelX - 5, point.labelY);
+        ctx.strokeStyle = alpha(point.series.color, 0.6);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = point.series.color;
+        ctx.fillText(point.text, labelX, point.labelY);
+      });
+      ctx.restore();
+    }
+
     /* ---- tooltip ---- */
     if (this.hover >= 0 && this.hover < labels.length) {
-      var html = '<p class="chart__tip-label">' + escapeHtml(labels[this.hover]) + '</p>';
+      var tooltipLabel = this.opts.tooltipLabels && this.opts.tooltipLabels[this.hover] || labels[this.hover];
+      var html = '<p class="chart__tip-label">' + escapeHtml(formatTime(tooltipLabel)) + '</p>';
       series.forEach(function (ser) {
         var v = ser.values[this.hover];
         html += '<p class="chart__tip-row">'
@@ -633,7 +714,8 @@
     if (!this.canvas) { return; }
     var rect = this.canvas.getBoundingClientRect();
     var W = Math.max(80, Math.round(rect.width || 240));
-    var H = Math.max(70, Math.round(rect.height || (W * 0.66)));
+    // Size from width so the full lower arc remains visible after resizing.
+    var H = Math.round(W * 0.90);
 
     var dpr = Math.min(win.devicePixelRatio || 1, DPR_CAP);
     this.canvas.width = Math.round(W * dpr);
@@ -645,11 +727,12 @@
 
     var min = isNum(this.opts.min) ? this.opts.min : 0;
     var max = isNum(this.opts.max) ? this.opts.max : 50;
-    var value = isNum(this.opts.value) ? this.opts.value : min;
+    var hasValue = isNum(this.opts.value);
+    var value = hasValue ? this.opts.value : min;
 
     var cx = W / 2;
-    var cy = H * 0.80;
-    var r = Math.max(28, Math.min(W / 2 - 14, H * 0.74));
+    var cy = H * 0.51;
+    var r = Math.max(24, Math.min(W / 2 - 30, H * 0.40));
     var lw = Math.max(9, r * 0.20);
     var start = Math.PI * 0.78;          /* 240 degree sweep */
     var sweep = Math.PI * 1.44;
@@ -721,16 +804,15 @@
     ctx.font = '9px ' + mono;
     ctx.fillStyle = T.lo;
     ctx.textBaseline = 'middle';
-    ctx.textAlign = 'right';
-    ctx.fillText(fmt(min, 0) + (this.opts.unit || ''), cx - r + 4, cy - 6);
-    ctx.textAlign = 'left';
-    ctx.fillText(fmt(max, 0) + (this.opts.unit || ''), cx + r - 4, cy - 6);
+    ctx.textAlign = 'center';
+    ctx.fillText(fmt(min, 0) + (this.opts.unit || ''), cx + Math.cos(start) * r, cy + Math.sin(start) * r + lw / 2 + 16);
+    ctx.fillText(fmt(max, 0) + (this.opts.unit || ''), cx + Math.cos(start + sweep) * r, cy + Math.sin(start + sweep) * r + lw / 2 + 16);
 
     /* readout */
     ctx.textAlign = 'center';
     ctx.fillStyle = T.hi;
     ctx.font = '600 ' + Math.max(18, Math.round(r * 0.40)) + 'px ' + mono;
-    ctx.fillText(fmt(value, this.opts.decimals !== undefined ? this.opts.decimals : 1), cx, cy - r * 0.30);
+    ctx.fillText(hasValue ? fmt(value, this.opts.decimals !== undefined ? this.opts.decimals : 1) : '--', cx, cy - r * 0.30);
     ctx.fillStyle = T.lo;
     ctx.font = '10px ' + mono;
     ctx.fillText(this.opts.unit || '', cx, cy - r * 0.30 + Math.max(16, r * 0.30));

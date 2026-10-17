@@ -121,7 +121,7 @@ $ecoWindow   = (int) setting('device_online_window_s', defined('DEVICE_ONLINE_WI
     Array.prototype.forEach.call(doc.querySelectorAll('[data-temp-delta-c]'), function (node) {
       var c = parseFloat(node.getAttribute('data-temp-delta-c'));
       if (isNaN(c)) { return; }
-      node.textContent = (unit === 'f' ? toF(c) : c).toFixed(1);
+      node.textContent = (unit === 'f' ? c * 9 / 5 : c).toFixed(1);
     });
 
     Array.prototype.forEach.call(doc.querySelectorAll('[data-temp-range-c]'), function (node) {
@@ -140,7 +140,8 @@ $ecoWindow   = (int) setting('device_online_window_s', defined('DEVICE_ONLINE_WI
     doc.dispatchEvent(new CustomEvent('eco:unit', { detail: { unit: unit } }));
 
     if (persist) {
-      doc.cookie = 'eco_unit=' + unit + ';path=' + (window.ECOSENSE_BASE || '/') + ';max-age=31536000;samesite=Lax';
+      var cookiePath = new URL(window.ECOSENSE_BASE || '/', window.location.href).pathname;
+      doc.cookie = 'eco_unit=' + unit + ';path=' + cookiePath + ';max-age=31536000;samesite=Lax';
     }
   }
 

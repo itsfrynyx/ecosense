@@ -4,6 +4,9 @@ define('ECOSENSE_API', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_login();
+if (!db_available()) json_response(['ok' => false, 'error' => 'Database not available'], 503);
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -35,7 +38,7 @@ foreach ($devices as $dev) {
         $computed = device_status_from_last_seen($lastSeen);
         if ($computed === 'online') {
             $status = 'online';
-        } elseif ($status !== 'online') {
+        } else {
             $status = 'offline';
         }
     }
@@ -48,7 +51,7 @@ foreach ($devices as $dev) {
         }
     }
 
-    $latest = db_one('SELECT temperature_c, humidity_pct, rain_raw, rain_detected, pressure_hpa, heat_index_c, lux, battery_pct, signal_dbm, recorded_at FROM readings WHERE device_id = ? ORDER BY recorded_at DESC, id DESC LIMIT 1', [$devId]);
+    $latest = db_one('SELECT temperature_c, humidity_pct, rain_raw, rain_detected, heat_index_c, signal_dbm, recorded_at FROM readings WHERE device_id = ? ORDER BY recorded_at DESC, id DESC LIMIT 1', [$devId]);
 
     $deviceData = [
         'device_uid'   => (string) $dev['device_uid'],
@@ -60,15 +63,12 @@ foreach ($devices as $dev) {
     ];
 
     if ($latest) {
-        $deviceData['battery_pct'] = $latest['battery_pct'] !== null ? (int) $latest['battery_pct'] : null;
         $deviceData['signal_dbm']  = $latest['signal_dbm'] !== null ? (int) $latest['signal_dbm'] : null;
         $deviceData['temperature_c'] = $latest['temperature_c'] !== null ? (float) $latest['temperature_c'] : null;
         $deviceData['humidity_pct']  = $latest['humidity_pct'] !== null ? (float) $latest['humidity_pct'] : null;
         $deviceData['rain_raw'] = $latest['rain_raw'] !== null ? (int) $latest['rain_raw'] : null;
         $deviceData['rain_detected'] = $latest['rain_detected'] !== null ? (int) $latest['rain_detected'] : null;
-        $deviceData['pressure_hpa']  = $latest['pressure_hpa'] !== null ? (float) $latest['pressure_hpa'] : null;
         $deviceData['heat_index_c']  = $latest['heat_index_c'] !== null ? (float) $latest['heat_index_c'] : null;
-        $deviceData['lux']           = $latest['lux'] !== null ? (float) $latest['lux'] : null;
         $deviceData['last_seen_at']  = $latest['recorded_at'] ?? $lastSeen;
         if ($latest['recorded_at']) {
             $lts = strtotime((string) $latest['recorded_at']);
@@ -79,7 +79,7 @@ foreach ($devices as $dev) {
         }
         $deviceData['has_reading'] = true;
 
-        $series = get_series_last60($devId);
+        $series = isset($_GET['series']) && $_GET['series'] === '0' ? [] : get_series_last60($devId);
         if (!empty($series['labels']) || !empty($series['temperature_c'])) {
             $deviceData['series'] = $series;
         }
@@ -90,6 +90,8 @@ foreach ($devices as $dev) {
     $resultDevices[] = $deviceData;
 }
 
+if (db_error() !== '') json_response(['ok' => false, 'error' => 'Telemetry query failed. Run the database migration.'], 503);
+
 echo json_encode([
     'ok'          => true,
     'server_time' => date('Y-m-d H:i:s'),
@@ -99,14 +101,8 @@ echo json_encode([
 
 function get_series_last60($devId)
 {
-    $rows = db_all('SELECT recorded_at, temperature_c, humidity_pct, pressure_hpa FROM readings WHERE device_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL 60 MINUTE) ORDER BY recorded_at ASC, id ASC', [$devId]);
+    $rows = db_all('SELECT recorded_at, temperature_c, humidity_pct, rain_detected FROM readings WHERE device_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL 60 MINUTE) ORDER BY recorded_at ASC, id ASC', [$devId]);
     
-    if (empty($rows)) {
-        $rows = db_all('SELECT recorded_at, temperature_c, humidity_pct, pressure_hpa FROM readings WHERE device_id = ? ORDER BY recorded_at DESC, id DESC LIMIT 60', [$devId]);
-        if (!empty($rows)) {
-            $rows = array_reverse($rows);
-        }
-    }
 
     $labels = [];
     $temp = [];
@@ -125,13 +121,13 @@ function get_series_last60($devId)
         }
         $temp[] = $r['temperature_c'] !== null ? (float) $r['temperature_c'] : null;
         $hum[]  = $r['humidity_pct'] !== null ? (float) $r['humidity_pct'] : null;
-        $pres[] = $r['pressure_hpa'] !== null ? (float) $r['pressure_hpa'] : null;
+        $pres[] = $r['rain_detected'] !== null ? (float) $r['rain_detected'] : null;
     }
 
     return [
         'labels'        => $labels,
         'temperature_c' => $temp,
         'humidity_pct'  => $hum,
-        'pressure_hpa'  => $pres,
+        'rain_detected'  => $pres,
     ];
 }

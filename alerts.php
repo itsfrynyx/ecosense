@@ -10,7 +10,9 @@ $ecoScripts = ['assets/js/pages.js'];
 $ecoStyles = ['assets/css/app.css', 'assets/css/pages.css'];
 
 $errors = [];
+$alertPage = max(1, (int) ($_POST['page'] ?? $_GET['page'] ?? 1));
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
+    require_role(['admin', 'operator']);
     $action = isset($_POST['action']) ? trim((string)$_POST['action']) : '';
     $ruleId = isset($_POST['rule_id']) ? (int)$_POST['rule_id'] : 0;
     $alertId = isset($_POST['alert_id']) ? (int)$_POST['alert_id'] : 0;
@@ -23,7 +25,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
     $enabled = isset($_POST['enabled']) ? 1 : 0;
 
     if ($action === 'create' || $action === 'edit') {
-        if ($metric === '') $errors[] = 'Metric required';
+        if (!in_array($metric, ['temperature_c', 'humidity_pct', 'rain_detected'], true)) $errors[] = 'Choose temperature, humidity or rain detection';
+        if ($metric === 'rain_detected' && !in_array($threshold, [0.0, 1.0], true)) $errors[] = 'Rain threshold must be 0 (dry) or 1 (wet)';
         if (!in_array($operator, ['>','<','>=','<='], true)) $operator = '>';
         if ($severity !== 'critical') $severity = 'warning';
         $devFk = ($deviceAll || $deviceId <= 0) ? null : $deviceId;
@@ -44,15 +47,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
     } elseif ($action === 'ack' && $alertId > 0) {
         db_query('UPDATE alerts SET acknowledged_at = NOW() WHERE id=? AND acknowledged_at IS NULL', [$alertId]);
         flash('success', 'Alert acknowledged');
-        redirect('alerts.php');
+        redirect('alerts.php?page=' . $alertPage . '#alert-log');
     }
 }
 
 foreach ($errors as $e) flash('error', $e);
 
 $devices = db_all('SELECT id, device_uid, name FROM devices ORDER BY device_uid ASC');
-$rules = db_all('SELECT ar.*, d.device_uid, d.name FROM alert_rules ar LEFT JOIN devices d ON d.id = ar.device_id ORDER BY ar.id DESC');
-$alerts = db_all('SELECT a.*, d.device_uid, d.name AS device_name FROM alerts a LEFT JOIN devices d ON d.id = a.device_id ORDER BY a.triggered_at DESC, a.id DESC LIMIT 100');
+$rules = db_all('SELECT ar.*, d.device_uid, d.name FROM alert_rules ar LEFT JOIN devices d ON d.id = ar.device_id WHERE ar.metric IN ("temperature_c", "humidity_pct", "rain_detected") ORDER BY ar.id DESC');
+$alertsPerPage = 10;
+$alertTotal = (int) db_val('SELECT COUNT(*) FROM alerts WHERE metric IN ("temperature_c", "humidity_pct", "rain_detected")', [], 0);
+$alertPages = max(1, (int) ceil($alertTotal / $alertsPerPage));
+$alertPage = min($alertPage, $alertPages);
+$alertOffset = ($alertPage - 1) * $alertsPerPage;
+$alerts = db_all('SELECT a.*, d.device_uid, d.name AS device_name FROM alerts a LEFT JOIN devices d ON d.id = a.device_id WHERE a.metric IN ("temperature_c", "humidity_pct", "rain_detected") ORDER BY a.triggered_at DESC, a.id DESC LIMIT ' . $alertsPerPage . ' OFFSET ' . $alertOffset);
+$alertPageUrl = function ($page) { return url('alerts.php?page=' . (int) $page . '#alert-log'); };
 
 $ecoPageHasH1 = true;
 require __DIR__ . '/includes/header.php';
@@ -82,7 +91,7 @@ require __DIR__ . '/includes/header.php';
             <td><?= status_badge($r['severity']) ?></td>
             <td><?= $r['enabled'] ? 'Yes' : 'No' ?></td>
             <td class="actions">
-              <button class="btn btn--ghost btn--sm" data-edit-rule='<?= json_encode($r) ?>'>Edit</button>
+              <button class="btn btn--ghost btn--sm" data-edit-rule='<?= e(json_encode($r)) ?>'>Edit</button>
               <form method="post" style="display:inline" onsubmit="return confirm('Delete rule?')">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="delete_rule">
@@ -97,7 +106,7 @@ require __DIR__ . '/includes/header.php';
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="alert-log">
     <div class="card__head"><h3>Alert log</h3></div>
     <div class="table-wrap">
       <table class="table">
@@ -118,14 +127,35 @@ require __DIR__ . '/includes/header.php';
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="ack">
                 <input type="hidden" name="alert_id" value="<?= (int)$a['id'] ?>">
+                <input type="hidden" name="page" value="<?= $alertPage ?>">
                 <button class="btn btn--primary btn--sm">Acknowledge</button>
               </form>
               <?php endif; ?>
             </td>
           </tr>
         <?php endforeach; ?>
+        <?php if (!$alerts): ?>
+          <tr><td colspan="8">No alerts recorded.</td></tr>
+        <?php endif; ?>
         </tbody>
       </table>
+    </div>
+    <div class="card__body">
+      <nav aria-label="Alert log pagination" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="mono">Showing <?= $alertTotal ? $alertOffset + 1 : 0 ?>–<?= min($alertOffset + count($alerts), $alertTotal) ?> of <?= $alertTotal ?> alerts · Page <?= $alertPage ?> of <?= $alertPages ?></span>
+        <div style="display:flex;gap:8px">
+          <?php if ($alertPage > 1): ?>
+            <a class="btn btn--ghost btn--sm" rel="prev" href="<?= e($alertPageUrl($alertPage - 1)) ?>">Previous</a>
+          <?php else: ?>
+            <button type="button" class="btn btn--ghost btn--sm" disabled>Previous</button>
+          <?php endif; ?>
+          <?php if ($alertPage < $alertPages): ?>
+            <a class="btn btn--ghost btn--sm" rel="next" href="<?= e($alertPageUrl($alertPage + 1)) ?>">Next</a>
+          <?php else: ?>
+            <button type="button" class="btn btn--ghost btn--sm" disabled>Next</button>
+          <?php endif; ?>
+        </div>
+      </nav>
     </div>
   </div>
 </main>
@@ -145,7 +175,7 @@ require __DIR__ . '/includes/header.php';
         <label class="checkbox"><input type="checkbox" name="device_all" value="1"> Apply to all devices</label>
       </div>
       <div class="field__row">
-        <div class="field"><label for="create_metric">Metric</label><select name="metric" id="create_metric"><option value="temperature_c">temperature_c</option><option value="humidity_pct">humidity_pct</option><option value="pressure_hpa">pressure_hpa</option><option value="lux">lux</option><option value="battery_pct">battery_pct</option></select></div>
+        <div class="field"><label for="create_metric">Metric</label><select name="metric" id="create_metric"><option value="temperature_c">temperature_c</option><option value="humidity_pct">Humidity (%)</option><option value="rain_detected">Rain (0=dry, 1=wet)</option></select></div>
         <div class="field"><label for="create_operator">Operator</label><select name="operator" id="create_operator"><option value=">">></option><option value="<"><</option><option value=">=">>=</option><option value="<="><=</option></select></div>
         <div class="field"><label for="create_threshold">Threshold</label><input type="number" step="0.01" name="threshold" id="create_threshold" required></div>
       </div>
@@ -176,7 +206,7 @@ require __DIR__ . '/includes/header.php';
         </select>
       </div>
       <div class="field__row">
-        <div class="field"><label for="edit_r_metric">Metric</label><select name="metric" id="edit_r_metric"><option value="temperature_c">temperature_c</option><option value="humidity_pct">humidity_pct</option><option value="pressure_hpa">pressure_hpa</option><option value="lux">lux</option><option value="battery_pct">battery_pct</option></select></div>
+        <div class="field"><label for="edit_r_metric">Metric</label><select name="metric" id="edit_r_metric"><option value="temperature_c">temperature_c</option><option value="humidity_pct">Humidity (%)</option><option value="rain_detected">Rain (0=dry, 1=wet)</option></select></div>
         <div class="field"><label for="edit_r_operator">Operator</label><select name="operator" id="edit_r_operator"><option value=">">></option><option value="<"><</option><option value=">=">>=</option><option value="<="><=</option></select></div>
         <div class="field"><label for="edit_r_threshold">Threshold</label><input type="number" step="0.01" name="threshold" id="edit_r_threshold" required></div>
       </div>

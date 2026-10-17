@@ -1205,13 +1205,14 @@ body.app::before {
 .legend__swatch { width: 12px; height: 3px; border-radius: 2px; flex: none; }
 
 .gauge-wrap { display: grid; justify-items: center; gap: 4px; padding: 6px 0 2px; }
-.gauge { position: relative; width: 100%; max-width: 240px; min-width: 0; }
+.gauge { position: relative; width: 100%; max-width: 280px; min-width: 0; }
 .gauge canvas { display: block; width: 100%; height: auto; }
 .gauge__legend {
   display: grid;
-  gap: 4px;
+  gap: 8px;
   width: 100%;
-  max-width: 240px;
+  max-width: 280px;
+  margin: 12px auto 0;
   font-family: var(--font-mono);
   font-size: 0.66rem;
   color: var(--text-lo);

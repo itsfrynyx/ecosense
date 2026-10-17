@@ -8,11 +8,14 @@ require_once __DIR__ . '/../includes/auth.php';
 
 ensure_session();
 require_login();
+require_role(['admin', 'operator']);
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    header('Allow: POST');
     echo json_encode(['ok' => false, 'error' => 'Method not allowed'], JSON_UNESCAPED_UNICODE);
     exit;
 }

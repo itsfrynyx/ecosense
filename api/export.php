@@ -1,63 +1,30 @@
 <?php
 define('ECOSENSE_API', true);
-
-require_once __DIR__ . '/../config/config.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
-
-ensure_session();
+require_once __DIR__ . '/../includes/telemetry.php';
 require_login();
-
-$deviceUid = isset($_GET['device_uid']) ? trim((string) $_GET['device_uid']) : '';
-$from = isset($_GET['from']) ? trim((string) $_GET['from']) : '';
-$to   = isset($_GET['to']) ? trim((string) $_GET['to']) : '';
-
+if (!db_available()) json_response(['ok' => false, 'error' => 'Database not available'], 503);
+$deviceUid = isset($_GET['device_uid']) && is_string($_GET['device_uid']) ? trim($_GET['device_uid']) : '';
 $device = null;
 if ($deviceUid !== '') {
     $device = db_one('SELECT id, device_uid FROM devices WHERE device_uid = ? LIMIT 1', [$deviceUid]);
+    if (!$device) json_response(['ok' => false, 'error' => 'Device not found'], 404);
 }
-
-$filename = 'ecosense_readings_' . date('Ymd_His') . '.csv';
+try {
+    $filters = telemetry_filters($_GET);
+} catch (InvalidArgumentException $error) {
+    json_response(['ok' => false, 'error' => $error->getMessage()], 422);
+}
+$rows = telemetry_rows($device ? (int) $device['id'] : null, $filters);
+if (db_error() !== '') json_response(['ok' => false, 'error' => 'Export query failed'], 503);
 header('Content-Type: text/csv; charset=utf-8');
-header('Content-Disposition: attachment; filename="' . $filename . '"');
-header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-header('Pragma: no-cache');
-
+header('Content-Disposition: attachment; filename="ecosense_readings_' . date('Ymd_His') . '.csv"');
+header('Cache-Control: no-store');
 $output = fopen('php://output', 'w');
-fputcsv($output, ['timestamp', 'device_uid', 'temperature_c', 'humidity_pct', 'pressure_hpa', 'heat_index_c', 'lux', 'battery_pct', 'signal_dbm']);
-
-$sql = 'SELECT d.device_uid, r.recorded_at, r.temperature_c, r.humidity_pct, r.pressure_hpa, r.heat_index_c, r.lux, r.battery_pct, r.signal_dbm FROM readings r JOIN devices d ON d.id = r.device_id WHERE 1=1';
-$params = [];
-
-if ($device) {
-    $sql .= ' AND r.device_id = ?';
-    $params[] = (int) $device['id'];
+fputcsv($output, ['timestamp', 'device_uid', 'temperature_c', 'humidity_pct', 'rain_detected', 'heat_index_c', 'signal_dbm']);
+foreach ($rows as $row) {
+    $uid = (string) $row['device_uid'];
+    if (preg_match('/^[=+@\t\r-]/', $uid)) $uid = "'" . $uid;
+    fputcsv($output, [$row['recorded_at'], $uid, $row['temperature_c'], $row['humidity_pct'], $row['rain_detected'], $row['heat_index_c'], $row['signal_dbm']]);
 }
-if ($from !== '') {
-    $sql .= ' AND r.recorded_at >= ?';
-    $params[] = $from;
-}
-if ($to !== '') {
-    $sql .= ' AND r.recorded_at <= ?';
-    $params[] = $to;
-}
-$sql .= ' ORDER BY r.recorded_at ASC, r.id ASC LIMIT 100000';
-
-$rows = db_all($sql, $params);
-foreach ($rows as $r) {
-    fputcsv($output, [
-        $r['recorded_at'] ?? '',
-        $r['device_uid'] ?? ($deviceUid ?? ''),
-        $r['temperature_c'] ?? '',
-        $r['humidity_pct'] ?? '',
-        $r['pressure_hpa'] ?? '',
-        $r['heat_index_c'] ?? '',
-        $r['lux'] ?? '',
-        $r['battery_pct'] ?? '',
-        $r['signal_dbm'] ?? '',
-    ]);
-}
-
 fclose($output);
-exit;
